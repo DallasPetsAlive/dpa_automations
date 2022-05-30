@@ -13,10 +13,13 @@ def handler(event: Dict[str, Any], _: Any) -> None:
 
     config = configparser.ConfigParser()
     config.read("config.ini")
+    assert "shelterluv" in config.sections()
+    assert "airtable" in config.sections()
     shelterluv_key = config["shelterluv"]["SHELTERLUV_API_KEY"]
+    airtable_section = config["airtable"]
 
-    animals = get_shelterluv_pets(shelterluv_key)
-    logger.info(animals)
+    get_shelterluv_pets(shelterluv_key)
+    get_airtable_pets(airtable_section)
 
 
 def get_shelterluv_pets(shelterluv_key: str) -> Dict[str, Any]:
@@ -37,7 +40,7 @@ def get_shelterluv_pets(shelterluv_key: str) -> Dict[str, Any]:
         response_json = response.json()
 
         if response_json["success"] != 1:
-            logger.error("invalid attempt")
+            logger.error(response_json.get("error_message"))
             raise requests.RequestException(response)
 
         total_count = response_json["total_count"]
@@ -71,3 +74,27 @@ def get_shelterluv_pets(shelterluv_key: str) -> Dict[str, Any]:
         logger.error("something went wrong, missing animals")
 
     return animals
+
+
+def get_airtable_pets(airtable_section: Any) -> Dict[str, Any]:
+    """Get the new digs pets from Airtable."""
+    url = "https://api.airtable.com/v0/" + airtable_section["BASE"] + "/Pets"
+    headers = {"Authorization": "Bearer " + airtable_section["AIRTABLE_API_KEY"]}
+
+    response = requests.get(url, headers=headers)
+    if response.status_code != requests.codes.ok:
+        logger.error("Airtable response: ")
+        logger.error(response)
+        logger.error("URL: %s", url)
+        logger.error("Headers: %s", str(headers))
+        raise Exception
+
+    airtable_response = response.json()
+
+    airtable_pets = {}
+
+    for pet in airtable_response.get("records", []):
+        if "Published - Available" in pet.get("fields").get("Status"):
+            airtable_pets[pet["id"]] = pet["fields"]
+
+    return airtable_pets
