@@ -51,6 +51,15 @@ resource "aws_lambda_function" "petfinder_sync" {
   source_code_hash = filebase64sha256("petfinder_sync.zip")
 
   runtime = "python3.9"
+
+  layers = [aws_lambda_layer_version.requests_layer.arn]
+}
+
+resource "aws_lambda_layer_version" "requests_layer" {
+  filename   = "requests.zip"
+  layer_name = "requests_layer"
+
+  compatible_runtimes = ["python3.9"]
 }
 
 resource "aws_cloudwatch_log_group" "petfinder_sync_log_group" {
