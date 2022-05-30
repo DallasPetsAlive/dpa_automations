@@ -43,8 +43,6 @@ resource "aws_lambda_function" "petfinder_sync" {
     aws_cloudwatch_log_group.petfinder_sync_log_group,
   ]
 
-  # If the file is not in the current working directory you will need to include a 
-  # path.module in the filename.
   filename      = "petfinder_sync.zip"
   function_name = "petfinder_sync"
   role          = aws_iam_role.petfinder_sync_iam.arn
