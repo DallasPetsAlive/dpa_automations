@@ -18,7 +18,30 @@
     rev: "v0.960"
     hooks:
     -   id: mypy
-        args: ["--strict", "--ignore-missing-imports"]
+        name: mypy_petfinder_sync
+        files: ^petfinder_sync/
+        entry: mypy petfinder_sync/
+        pass_filenames: false
+        args: [
+            "--strict",
+            "--ignore-missing-imports",
+            "--exclude=petfinder_sync/build",
+            "--exclude=petfinder_sync/infrastructure",
+            "--exclude=petfinder_sync/run*"
+        ]
+        additional_dependencies: [types-requests>=2.27.29]
+    -   id: mypy
+        name: mypy_new_digs_to_rescue_groups
+        files: ^new_digs_to_rescue_groups/
+        entry: mypy new_digs_to_rescue_groups/
+        pass_filenames: false
+        args: [
+            "--strict",
+            "--ignore-missing-imports",
+            "--exclude=new_digs_to_rescue_groups/build",
+            "--exclude=new_digs_to_rescue_groups/infrastructure",
+            "--exclude=new_digs_to_rescue_groups/new_digs_to_rescue_groups/tests"
+        ]
         additional_dependencies: [types-requests>=2.27.29]
 -   repo: https://github.com/ambv/black
     rev: 22.3.0
@@ -28,6 +51,7 @@
     rev: 5.10.1
     hooks:
     -   id: isort
+        args: ["--profile", "black"]
 -   repo: local
     hooks:
     -   id: pytest-check

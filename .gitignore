@@ -3,6 +3,8 @@
 *.zip
 config.ini
 *layer*
+new_digs_to_rescue_groups/tmp/
+tmp/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
