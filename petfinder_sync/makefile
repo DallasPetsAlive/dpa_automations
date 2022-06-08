@@ -1,5 +1,5 @@
 build:
-	cd ./petfinder_sync && zip -r ../infrastructure/petfinder_sync.zip petfinder_sync.py config.ini
+	cd ./petfinder_sync && zip -r ../infrastructure/petfinder_sync.zip petfinder_sync.py constants.py __init__.py config.ini
 
 build-layer:
 	cd ./infrastructure/layer && pip install requests -t python && zip -r ../requests.zip python

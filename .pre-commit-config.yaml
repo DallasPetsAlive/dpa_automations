@@ -27,7 +27,8 @@
             "--ignore-missing-imports",
             "--exclude=petfinder_sync/build",
             "--exclude=petfinder_sync/infrastructure",
-            "--exclude=petfinder_sync/run*"
+            "--exclude=petfinder_sync/run*",
+            "--exclude=petfinder_sync/petfinder_sync/tests"
         ]
         additional_dependencies: [types-requests>=2.27.29]
     -   id: mypy
@@ -40,7 +41,7 @@
             "--ignore-missing-imports",
             "--exclude=new_digs_to_rescue_groups/build",
             "--exclude=new_digs_to_rescue_groups/infrastructure",
-            "--exclude=new_digs_to_rescue_groups/new_digs_to_rescue_groups/tests"
+            "--exclude=new_digs_to_rescue_groups/new_digs_to_rescue_groups/tests",
         ]
         additional_dependencies: [types-requests>=2.27.29]
 -   repo: https://github.com/ambv/black
