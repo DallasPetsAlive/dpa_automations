@@ -160,10 +160,10 @@ def shelterluv_to_csv(shelterluv_pets: Dict[str, Any]) -> List[Dict[str, Any]]:
             "photo5": photos[4],
             "photo6": photos[5],
             "arrival_date": datetime.datetime.fromtimestamp(
-                fields["LastIntakeUnixTime"]
+                int(fields["LastIntakeUnixTime"])
             ).strftime("%Y-%m-%d"),
             "birth_date": datetime.datetime.fromtimestamp(
-                fields["DOBUnixTime"]
+                int(fields["DOBUnixTime"])
             ).strftime("%Y-%m-%d"),
             "primaryColor": first_color,
             "secondaryColor": second_color,
@@ -384,15 +384,15 @@ def get_type_from_shelterluv(shelterluv_type: str) -> str:
     if shelterluv_type == "Large mammal":
         return "Barnyard"
     if shelterluv_type == "Exotic/Other":
-        return " Scales, Fins & Other"
+        return "Scales, Fins & Other"
     return shelterluv_type
 
 
 def get_breed_from_shelterluv(breed: str, species: str) -> Tuple[str, str]:
     """Get the primary and secondary breed from the shelterluv breed."""
     primary, secondary = "", ""
-    if breed.find("/") > -1:
-        primary, secondary = breed.split("/")
+    if breed.find("\\/") > -1:
+        primary, secondary = breed.split("\\/")
     else:
         primary = breed
 
@@ -402,13 +402,16 @@ def get_breed_from_shelterluv(breed: str, species: str) -> Tuple[str, str]:
         else:
             logger.error("no cat breed mapping found for {}".format(primary))
             primary = "Domestic Short Hair"
+            secondary = "Mix"
         if secondary and secondary in constants.SHELTERLUV_CAT_BREED_MAPPING:
             secondary = constants.SHELTERLUV_CAT_BREED_MAPPING[secondary]
         elif secondary == "Mix":
             secondary = "Mix"
+        elif not secondary:
+            secondary = ""
         else:
             logger.error("no cat breed mapping found for {}".format(secondary))
-            secondary = "Domestic Short Hair"
+            secondary = "Mix"
     elif species == "Dog":
         if primary and primary in constants.SHELTERLUV_DOG_BREED_MAPPING:
             primary = constants.SHELTERLUV_DOG_BREED_MAPPING[primary]
@@ -422,6 +425,8 @@ def get_breed_from_shelterluv(breed: str, species: str) -> Tuple[str, str]:
                 secondary = "Mix"
         elif secondary == "Mix":
             secondary = "Mix"
+        elif not secondary:
+            secondary = ""
         else:
             logger.error("no dog breed mapping found for {}".format(secondary))
             secondary = "Mix"
