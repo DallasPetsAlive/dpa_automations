@@ -44,6 +44,19 @@
             "--exclude=new_digs_to_rescue_groups/new_digs_to_rescue_groups/tests",
         ]
         additional_dependencies: [types-requests>=2.27.29]
+    -   id: mypy
+        name: mypy_gsheet_to_mailchimp_volunteers
+        files: ^gsheet_to_mailchimp_volunteers/
+        entry: mypy gsheet_to_mailchimp_volunteers/
+        pass_filenames: false
+        args: [
+            "--strict",
+            "--ignore-missing-imports",
+            "--exclude=gsheet_to_mailchimp_volunteers/build",
+            "--exclude=gsheet_to_mailchimp_volunteers/infrastructure",
+            "--exclude=gsheet_to_mailchimp_volunteers/gsheet_to_mailchimp_volunteers/tests",
+        ]
+        additional_dependencies: [types-requests>=2.27.29]
 -   repo: https://github.com/ambv/black
     rev: 22.3.0
     hooks:
