@@ -9,9 +9,6 @@ setup(
     author_email="katie@dallaspetsalive.org",
     packages=["gsheet_to_mailchimp_volunteers"],
     install_requires=[
-        "google-api-python-client",
-        "google-auth-httplib2",
-        "google-auth-oauthlib",
-        "requests",
+        "gspread",
     ],
 )

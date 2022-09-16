@@ -5,6 +5,7 @@ config.ini
 *layer*
 new_digs_to_rescue_groups/tmp/
 tmp/
+service_account.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
