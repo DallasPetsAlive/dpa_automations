@@ -10,5 +10,6 @@ setup(
     packages=["gsheet_to_mailchimp_volunteers"],
     install_requires=[
         "gspread",
+        "mailchimp_marketing",
     ],
 )

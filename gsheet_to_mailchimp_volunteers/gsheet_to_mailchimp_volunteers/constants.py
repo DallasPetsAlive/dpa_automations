@@ -71,3 +71,11 @@ TAB_MAPPING = {
         "email": "F4:F1000",
     },
 }
+
+ALWAYS_ADD_LIST = [
+    {
+        "first_name": "Management",
+        "last_name": "Team",
+        "email": "mgmt@dallaspetsalive.org",
+    },
+]

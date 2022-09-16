@@ -2,9 +2,13 @@ import gspread
 import logging
 import sys
 from configparser import ConfigParser
+from hashlib import md5
 from typing import Any, Dict, List
 
-from constants import TAB_MAPPING
+import mailchimp_marketing as MailchimpMarketing
+from mailchimp_marketing.api_client import ApiClientError
+
+from constants import ALWAYS_ADD_LIST, TAB_MAPPING
 
 logger: logging.Logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
@@ -27,6 +31,10 @@ def handler(event: Dict[str, Any], _: Any) -> None:
 
         volunteers = get_volunteer_data(file_key)
         logger.info("Got {} volunteers".format(len(volunteers)))
+
+        volunteers += ALWAYS_ADD_LIST
+
+        update_mailchimp(parser["mailchimp"], volunteers)
     except Exception as e:
         logger.exception("Exception occurred.")
         raise Exception from e
@@ -79,6 +87,56 @@ def get_volunteer_data(file_key: str) -> List[Dict[str, str]]:
             raise Exception (f"No volunteers found in tab: {tab}")
 
     return volunteers
+
+
+def update_mailchimp(config: Dict[str, str], volunteers: List[Dict[str, str]]) -> None:
+    api_key = config["api_key"]
+    list_id = config["list_id"]
+    tag_id = config["tag_id"]
+    server_prefix = config["server_prefix"]
+
+    client = MailchimpMarketing.Client()
+    client.set_config({
+        "api_key": api_key,
+        "server": server_prefix
+    })
+
+    payload = {
+        "update_existing": False,
+        "members": [],
+    }
+
+    for volunteer in volunteers:
+        payload["members"].append({
+            "email_address": volunteer["email"],
+            "merge_fields": {
+                "FNAME": volunteer["first_name"],
+                "LNAME": volunteer["last_name"],
+            },
+            "email_type": "html",
+            "tags": [tag_id],
+            "status": "subscribed",
+        })
+
+    try:
+        client.lists.batch_list_members(list_id, payload)
+
+    except ApiClientError as error:
+        logger.error(error.text)
+
+    # add the tag
+    for volunteer in volunteers:
+        email_hash = md5(volunteer["email"].encode()).hexdigest()
+        payload = {
+            "tags": [{
+                "name": tag_id,
+                "status": "active",
+            }],
+        }
+        try:
+            client.lists.update_list_member_tags(list_id, email_hash, payload)
+        except ApiClientError as error:
+            logger.error(error.text)
 
 
 if __name__ == "__main__":
