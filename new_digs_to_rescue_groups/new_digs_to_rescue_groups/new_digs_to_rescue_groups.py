@@ -70,26 +70,48 @@ def handler(event: Dict[str, Any], _: Any) -> None:
     except Exception as e:
         logger.exception("Exception occurred.")
         raise Exception from e
+        
+    logger.debug("Done")
 
 
 def get_airtable_pets() -> Any:
     """Get the new digs pets from Airtable."""
     url = "https://api.airtable.com/v0/" + config["airtable"]["BASE"] + "/Pets"
     headers = {"Authorization": "Bearer " + config["airtable"]["API_KEY"]}
+    
+    quit = False
+    pets = []
+    offset = None
+    
+    while not quit:
+        
+        params = {}
 
-    response = requests.get(url, headers=headers)
-    if response.status_code != requests.codes.ok:
-        logger.error("Airtable response: ")
-        logger.error(response)
-        logger.error("URL: %s", url)
-        logger.error("Headers: %s", str(headers))
-        raise Exception
+        if offset:
+            params = {
+                "offset": offset,
+            }
 
-    airtable_response = response.json()
+        response = requests.get(url, headers=headers, params=params)
+        if response.status_code != requests.codes.ok:
+            logger.error("Airtable response: ")
+            logger.error(response)
+            logger.error("URL: %s", url)
+            logger.error("Headers: %s", str(headers))
+            raise Exception
+    
+        airtable_response = response.json()
+        
+        if not airtable_response.get("offset"):
+            quit = True
+        else:
+            offset = airtable_response["offset"]
+        
+        pets += airtable_response["records"]
 
-    logger.info("got {} pets from Airtable".format(len(airtable_response["records"])))
+    logger.info("got {} pets from Airtable".format(len(pets)))
 
-    return airtable_response["records"]
+    return pets
 
 
 def create_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
@@ -251,6 +273,7 @@ def fix_unknowns(
 
 def upload_to_rescue_groups(csv_file: str) -> None:
     """Upload the new digs pets to rescuegroups.org."""
+    logger.info("Uploading to RG")
     file_upload: str = str(config["local"]["FILEPATH"]) + csv_file
     with ftplib.FTP(
         "ftp.rescuegroups.org",
