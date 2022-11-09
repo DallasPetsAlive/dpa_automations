@@ -1,6 +1,5 @@
 build:
-	cd ./new_digs_to_rescue_groups && zip -r ../infrastructure/new_digs_to_rescue_groups.zip new_digs_to_rescue_groups.py
-	cd ./infrastructure && zip -r ../infrastructure/new_digs_to_rescue_groups.zip config.ini
+	cd ./new_digs_to_rescue_groups && zip -r ../infrastructure/new_digs_to_rescue_groups.zip new_digs_to_rescue_groups.py config.ini
 
 build-layer:
 	cd ./infrastructure/layer && pip install requests -t python && zip -r ../requests.zip python

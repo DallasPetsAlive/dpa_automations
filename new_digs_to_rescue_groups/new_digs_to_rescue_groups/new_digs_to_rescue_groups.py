@@ -212,8 +212,9 @@ def create_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
             pet_row[indexes["dsc"]] = description
 
             pictures: List[str] = []
+            url = "https://dpa-media.s3.us-east-2.amazonaws.com/new-digs-photos/"
             for picture in pet["fields"].get("Pictures", []):
-                pictures.append(picture["url"])
+                pictures.append(url + pet["id"] + "/" + picture["filename"])
 
             if pictures:
                 pet_row[indexes["photo1"]] = pictures.pop(0)

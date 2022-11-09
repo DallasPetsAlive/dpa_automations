@@ -16,7 +16,7 @@ terraform {
 }
 
 provider "aws" {
-  profile = "default"
+  profile = "dpa"
   region  = "us-east-2"
 }
 
