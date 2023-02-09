@@ -1,8 +1,10 @@
 import boto3
 import botocore
+import html
 import json
 import logging
 import mimetypes
+import re
 from typing import Any, Dict, List
 
 import requests
@@ -25,6 +27,7 @@ def handler(event: Dict[str, Any], _: Any) -> None:
     wordpress_sync.get_wordpress_pets()
     wordpress_sync.delete_pets()
     wordpress_sync.create_pets()
+    wordpress_sync.update_pets()
 
 class WordpressSync:
     token: str
@@ -135,32 +138,9 @@ class WordpressSync:
                 # get the cover photo
                 cover_photo_id = None
                 if coverPhoto := pet.get("coverPhoto"):
-                    response = requests.get(coverPhoto, stream=True)
-                    if response.status_code != 200:
-                        logger.error("could not get cover photo {}: {}".format(coverPhoto, response.text))
+                    cover_photo_id = self.upload_featured_photo(coverPhoto)
+                    if cover_photo_id == -1:
                         continue
-
-                    cover_photo = response.raw.read()
-
-                    filename = coverPhoto.split("/")[-1]
-                    content_type = mimetypes.guess_type(filename)
-
-                    # create the media for the cover photo
-                    response = requests.post(
-                        "https://dallaspetsalive.org/wp-json/wp/v2/media",
-                        headers={
-                            "Authorization": "Bearer {}".format(self.token),
-                            "Content-Disposition": "attachment; filename={}".format(filename),
-                            "Content-Type": content_type[0],
-                        },
-                        data=cover_photo,
-                    )
-
-                    if response.status_code != 201:
-                        logger.error("could not upload cover photo {}: {}".format(coverPhoto, response.text))
-                        continue
-                
-                    cover_photo_id = response.json()["id"]
 
                 attributes = []
 
@@ -229,5 +209,122 @@ class WordpressSync:
                     logger.error("could not create pet {}: {}".format(pet_data, response.text))
                     continue
 
+    def update_pets(self):
+        pets_to_maybe_update = [pet for pet in self.wordpress_ids if pet in self.dynamodb_ids]
 
+        for dynamodb_pet in self.dynamodb_pets:
+            if dynamodb_pet["id"] not in pets_to_maybe_update:
+                continue
 
+            new_pet_data = {}
+
+            for wordpress_pet in self.wordpress_pets:
+                if wordpress_pet.get("acf", {}).get("id") != dynamodb_pet["id"]:
+                    continue
+
+                wordpress_title = self.convert_wordpress_content(wordpress_pet.get("title", {}).get("rendered"))
+
+                if wordpress_title != dynamodb_pet["name"].strip():
+                    logger.debug("renaming from {}".format(wordpress_title))
+                    new_pet_data["title"] = dynamodb_pet["name"].strip()
+
+                wordpress_description = self.strip_description(self.convert_wordpress_content(wordpress_pet.get("content", {}).get("rendered")))
+
+                if wordpress_description != self.strip_description(dynamodb_pet["description"].strip()):
+                    logger.debug("updating description from {}".format(wordpress_pet.get("content", {}).get("rendered")))
+                    new_pet_data["content"] = dynamodb_pet["description"].strip()
+
+                last_index = 0
+                for index, photo in enumerate(dynamodb_pet.get("photos", [])):
+                    last_index += 1
+                    if index > 19:
+                        break
+                    if f"photos_{index}" not in wordpress_pet.get("acf", {}):
+                        logger.debug("adding photo {}".format(photo))
+                        if "acf" not in new_pet_data:
+                            new_pet_data["acf"] = {}
+                        new_pet_data["acf"][f"photos_{index}"] = photo
+                    elif wordpress_pet.get("acf", {}).get(f"photos_{index}") != photo:
+                        logger.debug("updating photo {}".format(photo))
+                        if "acf" not in new_pet_data:
+                            new_pet_data["acf"] = {}
+                        new_pet_data["acf"][f"photos_{index}"] = photo
+
+                        if index == 0:
+                            logger.debug("updating featured photo {}".format(photo))
+
+                            photo_id = self.upload_featured_photo(photo)
+                            if photo_id != -1:
+                                new_pet_data["featured_media"] = photo_id
+
+                while wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}"):
+                    logger.debug("removing photo {}".format(wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}")))
+                    if "acf" not in new_pet_data:
+                        new_pet_data["acf"] = {}
+                    new_pet_data["acf"][f"photos_{last_index + 1}"] = ""
+                    last_index += 1
+
+                break
+            
+            if new_pet_data:
+                logger.info("updating ID {} data {}".format(dynamodb_pet["id"], new_pet_data))
+
+                response = requests.post(
+                    "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}".format(wordpress_pet["id"]),
+                    headers={
+                        "Authorization": "Bearer {}".format(self.token),
+                    },
+                    json=new_pet_data,
+                )
+
+                if response.status_code != 200:
+                    logger.error("could not update pet {}: {}".format(new_pet_data, response.text))
+                    continue
+
+    @staticmethod
+    def convert_wordpress_content(content: str) -> str:
+        content = html.unescape(content)
+        content = content.replace("”", "\"")
+        content = content.replace("“", "\"")
+        content = content.replace("’", "'")
+        content = content.replace("</p>\n<p>", "\\n\\n")
+        content = content.replace("<p>", "")
+        content = content.replace("</p>", "")
+        content = content.replace("– ", "- ")
+        return content
+
+    @staticmethod
+    def strip_description(description: str) -> str:
+        description = description.replace("\\n", "")
+        description = description.replace("\\r", "")
+        description = description.replace("<br", "")
+        description = re.sub(r'\W+', '', description)
+        return description
+
+    def upload_featured_photo(self, photoUrl: str) -> int:
+        response = requests.get(photoUrl, stream=True)
+        if response.status_code != 200:
+            logger.error("could not get cover photo {}: {}".format(photoUrl, response.text))
+            return -1
+
+        cover_photo = response.raw.read()
+
+        filename = photoUrl.split("/")[-1]
+        content_type = mimetypes.guess_type(filename)
+
+        # create the media for the cover photo
+        response = requests.post(
+            "https://dallaspetsalive.org/wp-json/wp/v2/media",
+            headers={
+                "Authorization": "Bearer {}".format(self.token),
+                "Content-Disposition": "attachment; filename={}".format(filename),
+                "Content-Type": content_type[0],
+            },
+            data=cover_photo,
+        )
+
+        if response.status_code != 201:
+            logger.error("could not upload cover photo {}: {}".format(photoUrl, response.text))
+            return -1
+    
+        return response.json()["id"]
