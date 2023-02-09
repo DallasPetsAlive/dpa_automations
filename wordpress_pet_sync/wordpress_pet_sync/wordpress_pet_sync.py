@@ -250,10 +250,10 @@ class WordpressSync:
                             new_pet_data["acf"] = {}
                         new_pet_data["acf"][f"photos_{index}"] = photo
 
-                        if index == 0:
+                        if index == 0 and dynamodb_pet.get("coverPhoto"):
                             logger.debug("updating featured photo {}".format(photo))
 
-                            photo_id = self.upload_featured_photo(photo)
+                            photo_id = self.upload_featured_photo(dynamodb_pet.get("coverPhoto"))
                             if photo_id != -1:
                                 new_pet_data["featured_media"] = photo_id
 
