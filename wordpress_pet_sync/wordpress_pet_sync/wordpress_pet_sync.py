@@ -264,6 +264,13 @@ class WordpressSync:
                     new_pet_data["acf"][f"photos_{last_index + 1}"] = ""
                     last_index += 1
 
+                if dynamodb_pet.get("coverPhoto") and not wordpress_pet.get("featured_media"):
+                    logger.debug("updating featured photo {}".format(dynamodb_pet.get("coverPhoto")))
+
+                    photo_id = self.upload_featured_photo(dynamodb_pet.get("coverPhoto"))
+                    if photo_id != -1:
+                        new_pet_data["featured_media"] = photo_id
+
                 break
             
             if new_pet_data:
