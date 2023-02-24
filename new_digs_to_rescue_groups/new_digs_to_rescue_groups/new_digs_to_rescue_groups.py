@@ -279,10 +279,14 @@ def upload_to_rescue_groups(csv_file: str) -> None:
     """Upload the new digs pets to rescuegroups.org."""
     logger.info("Uploading to RG")
     file_upload: str = str(config["local"]["FILEPATH"]) + csv_file
-    with ftplib.FTP(
-        "ftp.rescuegroups.org",
-        config["rescuegroups"]["FTP_USERNAME"],
-        config["rescuegroups"]["FTP_PASSWORD"],
-    ) as ftp, open(file_upload, "rb") as file:
-        ftp.cwd("import")
-        ftp.storbinary(f"STOR {csv_file}", file)
+    try:
+        with ftplib.FTP(
+            "ftp.rescuegroups.org",
+            config["rescuegroups"]["FTP_USERNAME"],
+            config["rescuegroups"]["FTP_PASSWORD"],
+            timeout=30,
+        ) as ftp, open(file_upload, "rb") as file:
+            ftp.cwd("import")
+            ftp.storbinary(f"STOR {csv_file}", file)
+    except Exception:
+        logger.warning("Failed to upload to RG")
