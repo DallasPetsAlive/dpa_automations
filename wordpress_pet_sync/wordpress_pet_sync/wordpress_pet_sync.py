@@ -28,6 +28,7 @@ def handler(event: Dict[str, Any], _: Any) -> None:
     wordpress_sync.delete_pets()
     wordpress_sync.create_pets()
     wordpress_sync.update_pets()
+    wordpress_sync.post_to_slack()
 
 class WordpressSync:
     token: str
@@ -35,6 +36,13 @@ class WordpressSync:
     wordpress_pets: List[Dict[str, any]]
     dynamodb_ids: List[str]
     wordpress_ids: List[str]
+
+    deleted_pets: List[str]
+    added_pets: List[str]
+
+    def __init__(self):
+        self.deleted_pets = []
+        self.added_pets = []
 
     def get_token(self) -> None:
         credentials = json.loads(secrets_client.get_secret_value(SecretId="wordpress_credentials")["SecretString"])
@@ -118,6 +126,9 @@ class WordpressSync:
         for pet in self.wordpress_pets:
             if pet.get("acf", {}).get("id") in deleted_pets:
                 logger.debug("deleting {}".format(pet.get("acf", {}).get("id")))
+
+                self.deleted_pets.append(pet["title"]["rendered"])
+
                 response = requests.delete(
                     "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}?force=true".format(pet["id"]),
                     headers={"Authorization": "Bearer {}".format(self.token)},
@@ -134,6 +145,8 @@ class WordpressSync:
         for pet in self.dynamodb_pets:
             if pet["id"] in pets_to_add:
                 logger.debug("creating {}".format(pet["id"]))
+
+                self.added_pets.append(pet["name"])
 
                 # get the cover photo
                 cover_photo_id = None
@@ -190,6 +203,7 @@ class WordpressSync:
                         "species": pet.get("species"),
                         "source": pet.get("source"),
                         "status": pet.get("status"),
+                        "video": pet.get("video"),
                     },
                     "pet-attributes": attributes,
                 }
@@ -271,6 +285,24 @@ class WordpressSync:
                     if photo_id != -1:
                         new_pet_data["featured_media"] = photo_id
 
+                for attribute in wordpress_pet.get("acf", {}):
+                    if "photo" in attribute or attribute in ["description", "coverPhoto"]:
+                        continue
+
+                    wordpress_attribute = wordpress_pet["acf"].get(attribute)
+                    dynamodb_attribute = dynamodb_pet.get(attribute)
+
+                    if not wordpress_attribute and not dynamodb_attribute:
+                        continue
+
+                    if wordpress_attribute != dynamodb_attribute:
+                        logger.debug("updating attribute {} for {}".format(
+                            attribute, wordpress_pet.get("title", {}).get("rendered"))
+                        )
+                        if "acf" not in new_pet_data:
+                            new_pet_data["acf"] = {}
+                        new_pet_data["acf"][attribute] = dynamodb_pet.get(attribute)
+
                 break
             
             if new_pet_data:
@@ -335,3 +367,51 @@ class WordpressSync:
             return -1
     
         return response.json()["id"]
+    
+    def post_to_slack(self):
+        if not self.added_pets and not self.deleted_pets:
+            return
+        
+        message = {
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "The following changes were sent to Wordpress:",
+                    }
+                },
+                {
+                    "type": "divider",
+                },
+            ],
+        }
+
+        if self.added_pets:
+            message["blocks"].append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Added Pets*\n{}".format("\n".join(self.added_pets)),
+                },
+            })
+            if self.deleted_pets:
+                message["blocks"].append({
+                    "type": "divider",
+                })
+        if self.deleted_pets:
+            message["blocks"].append({
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": "*Deleted Pets*\n{}".format("\n".join(self.deleted_pets)),
+                },
+            })
+
+        webhook = json.loads(secrets_client.get_secret_value(SecretId="slack_alerts_webhook")["SecretString"])
+        url = webhook.get("url")
+
+        requests.post(
+            url,
+            json=message,
+        )
