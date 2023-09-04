@@ -26,7 +26,7 @@ provider "aws" {
 data "archive_file" "new_digs_to_rescue_groups_zip" {
   type = "zip"
 
-  source_dir  = "${path.module}/../new_digs_to_rescue_groups"
+  source_dir  = "${path.module}/../sync_to_rescue_groups"
   output_path = "${path.module}/sync.zip"
 }
 

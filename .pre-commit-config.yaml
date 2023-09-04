@@ -32,16 +32,16 @@
         ]
         additional_dependencies: [types-requests>=2.27.29]
     -   id: mypy
-        name: mypy_new_digs_to_rescue_groups
-        files: ^new_digs_to_rescue_groups/
-        entry: mypy new_digs_to_rescue_groups/
+        name: mypy_sync_to_rescue_groups
+        files: ^sync_to_rescue_groups/
+        entry: mypy sync_to_rescue_groups/
         pass_filenames: false
         args: [
             "--strict",
             "--ignore-missing-imports",
-            "--exclude=new_digs_to_rescue_groups/build",
-            "--exclude=new_digs_to_rescue_groups/infrastructure",
-            "--exclude=new_digs_to_rescue_groups/new_digs_to_rescue_groups/tests",
+            "--exclude=sync_to_rescue_groups/build",
+            "--exclude=sync_to_rescue_groups/infrastructure",
+            "--exclude=sync_to_rescue_groups/sync_to_rescue_groups/tests",
         ]
         additional_dependencies: [types-requests>=2.27.29]
 -   repo: https://github.com/ambv/black

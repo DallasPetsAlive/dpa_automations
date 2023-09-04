@@ -4,7 +4,7 @@ import csv
 
 import pytest
 
-from new_digs_to_rescue_groups.new_digs_to_rescue_groups import (
+from sync_to_rescue_groups.sync_to_rescue_groups import (
     CSV_HEADERS,
     create_csv_file,
     get_airtable_pets,

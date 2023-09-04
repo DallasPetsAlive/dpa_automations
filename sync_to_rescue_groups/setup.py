@@ -1,12 +1,12 @@
 from setuptools import setup
 
 setup(
-    name="new_digs_to_rescue_groups",
+    name="sync_to_rescue_groups",
     version="1.0",
-    description="sync new digs to rescuegroups.org",
+    description="sync new digs and shelterluv to rescuegroups.org",
     license="MIT",
     author="Katie Patterson",
     author_email="katie@dallaspetsalive.org",
-    packages=["new_digs_to_rescue_groups"],
+    packages=["sync_to_rescue_groups"],
     install_requires=["requests"],
 )
