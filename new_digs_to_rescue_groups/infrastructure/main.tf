@@ -7,8 +7,12 @@ terraform {
 
   required_providers {
     aws = {
-      source  = "hashicorp/aws"
-      version = "~> 3.27"
+      source = "hashicorp/aws"
+      version = "4.40.0"
+    }
+    archive = {
+      source  = "hashicorp/archive"
+      version = "~> 2.2.0"
     }
   }
 
@@ -16,8 +20,27 @@ terraform {
 }
 
 provider "aws" {
-  profile = "dpa"
   region  = "us-east-2"
+}
+
+data "archive_file" "new_digs_to_rescue_groups_zip" {
+  type = "zip"
+
+  source_dir  = "${path.module}/../new_digs_to_rescue_groups"
+  output_path = "${path.module}/sync.zip"
+}
+
+resource "aws_s3_bucket" "new_digs_to_rescue_groups_bucket" {
+  bucket = "dpa-rescue-groups-sync"
+}
+
+resource "aws_s3_object" "new_digs_to_rescue_groups_object" {
+  bucket = aws_s3_bucket.new_digs_to_rescue_groups_bucket.id
+
+  key    = "sync.zip"
+  source = data.archive_file.new_digs_to_rescue_groups_zip.output_path
+
+  etag = filemd5(data.archive_file.new_digs_to_rescue_groups_zip.output_path)
 }
 
 resource "aws_iam_role" "new_digs_to_rescue_groups_iam" {
@@ -58,12 +81,14 @@ resource "aws_lambda_function" "new_digs_to_rescue_groups" {
     aws_cloudwatch_log_group.new_digs_to_rescue_groups_log_group,
   ]
 
-  filename      = "new_digs_to_rescue_groups.zip"
   function_name = "new_digs_to_rescue_groups"
   role          = aws_iam_role.new_digs_to_rescue_groups_iam.arn
   handler       = "new_digs_to_rescue_groups.handler"
 
-  source_code_hash = filebase64sha256("new_digs_to_rescue_groups.zip")
+  s3_bucket = aws_s3_bucket.new_digs_to_rescue_groups_bucket.id
+  s3_key    = aws_s3_object.new_digs_to_rescue_groups_object.key
+
+  source_code_hash = data.archive_file.new_digs_to_rescue_groups_zip.output_base64sha256
 
   runtime = "python3.9"
   timeout = 60
