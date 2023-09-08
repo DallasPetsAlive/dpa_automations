@@ -81,9 +81,9 @@ resource "aws_lambda_function" "new_digs_to_rescue_groups" {
     aws_cloudwatch_log_group.new_digs_to_rescue_groups_log_group,
   ]
 
-  function_name = "new_digs_to_rescue_groups"
+  function_name = "sync_to_rescue_groups"
   role          = aws_iam_role.new_digs_to_rescue_groups_iam.arn
-  handler       = "new_digs_to_rescue_groups.handler"
+  handler       = "sync_to_rescue_groups.handler"
 
   s3_bucket = aws_s3_bucket.new_digs_to_rescue_groups_bucket.id
   s3_key    = aws_s3_object.new_digs_to_rescue_groups_object.key
@@ -154,7 +154,32 @@ resource "aws_cloudwatch_event_target" "new_digs_to_rescue_groups_event_target" 
 resource "aws_lambda_permission" "new_digs_to_rescue_groups_cloudwatch_permission" {
   statement_id = "AllowExecutionFromCloudWatch"
   action = "lambda:InvokeFunction"
-  function_name = "new_digs_to_rescue_groups"
+  function_name = "sync_to_rescue_groups"
   principal = "events.amazonaws.com"
   source_arn = aws_cloudwatch_event_rule.new_digs_to_rescue_groups_event_rule.arn
+}
+
+data "aws_secretsmanager_secret" "shelterluv_api_key" {
+  name = "shelterluv_api_key"
+}
+
+resource "aws_iam_policy" "rg_sync_get_shelterluv_api_key" {
+  name = "rg_sync_get_shelterluv_api_key"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = [
+        "secretsmanager:GetSecretValue",
+      ]
+      Effect = "Allow"
+      Resource = [
+        data.aws_secretsmanager_secret.shelterluv_api_key.arn,
+      ]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "secrets_lambda_policy" {
+  role       = aws_iam_role.new_digs_to_rescue_groups_iam.name
+  policy_arn = aws_iam_policy.rg_sync_get_shelterluv_api_key.arn
 }
