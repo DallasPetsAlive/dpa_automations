@@ -15,6 +15,8 @@ logger.setLevel(logging.DEBUG)
 
 secrets_client = boto3.client("secretsmanager")
 dynamodb_client = boto3.client("dynamodb")
+dynamodb_resource = boto3.resource("dynamodb")
+photos_table = dynamodb_resource.Table("FeaturedPhotos")
 
 
 def handler(event: Dict[str, Any], _: Any) -> None:
@@ -24,6 +26,7 @@ def handler(event: Dict[str, Any], _: Any) -> None:
 
     wordpress_sync.get_token()
     wordpress_sync.get_dynamodb_pets()
+    wordpress_sync.get_dynamodb_featured_photos()
     wordpress_sync.get_wordpress_pets()
     wordpress_sync.delete_pets()
     wordpress_sync.create_pets()
@@ -36,6 +39,7 @@ class WordpressSync:
     wordpress_pets: List[Dict[str, any]]
     dynamodb_ids: List[str]
     wordpress_ids: List[str]
+    featured_photos: Dict[str, str]
 
     deleted_pets: List[str]
     added_pets: List[str]
@@ -43,6 +47,7 @@ class WordpressSync:
     def __init__(self):
         self.deleted_pets = []
         self.added_pets = []
+        self.featured_photos = {}
 
     def get_token(self) -> None:
         credentials = json.loads(secrets_client.get_secret_value(SecretId="wordpress_credentials")["SecretString"])
@@ -95,6 +100,33 @@ class WordpressSync:
 
         self.dynamodb_pets = formatted_pets
 
+    def get_dynamodb_featured_photos(self) -> None:
+        photos = []
+        try:
+            response = dynamodb_client.scan(
+                TableName="FeaturedPhotos",
+            )
+
+            if "Items" not in response:
+                logger.error("No featured photos found")
+                return None
+
+            photos = response["Items"]
+
+            while lastKey := response.get("LastEvaluatedKey"):
+                response = dynamodb_client.scan(
+                    TableName="FeaturedPhotos",
+                    ExclusiveStartKey=lastKey,
+                )
+                photos.extend(response["Items"])
+        except botocore.exceptions.ClientError:
+            logger.exception("client error")
+            raise
+
+        for photo in photos:
+            photo_formatted = from_dynamodb_json(photo)
+            self.featured_photos[photo_formatted["id"]] = photo_formatted["photo"]
+
     def get_wordpress_pets(self):
         pets = []
         self.wordpress_ids = []
@@ -142,183 +174,195 @@ class WordpressSync:
 
         logger.info("creating {} pets".format(len(pets_to_add)))
 
-        for pet in self.dynamodb_pets:
-            if pet["id"] in pets_to_add:
-                logger.debug("creating {}".format(pet["id"]))
+        with photos_table.batch_writer() as batch:
+            for pet in self.dynamodb_pets:
+                if pet["id"] in pets_to_add:
+                    logger.debug("creating {}".format(pet["id"]))
 
-                self.added_pets.append(pet["name"])
+                    self.added_pets.append(pet["name"])
 
-                # get the cover photo
-                cover_photo_id = None
-                if coverPhoto := pet.get("coverPhoto"):
-                    cover_photo_id = self.upload_featured_photo(coverPhoto)
-                    if cover_photo_id == -1:
+                    # get the cover photo
+                    cover_photo_id = None
+                    if coverPhoto := pet.get("coverPhoto"):
+                        cover_photo_id = self.upload_featured_photo(coverPhoto)
+                        if cover_photo_id == -1:
+                            continue
+                        batch.put_item(Item={
+                            "id": pet["id"],
+                            "photo": coverPhoto,
+                        })
+
+                    attributes = []
+
+                    age_attributes = {
+                        "Baby": 264,
+                        "Young": 267,
+                        "Adult": 260,
+                        "Senior": 261,
+                    }
+
+                    if pet.get("age") and pet.get("age") in age_attributes:
+                        attributes.append(age_attributes[pet.get("age")])
+
+                    sex_attributes = {
+                        "Female": 262,
+                        "Male": 265,
+                    }
+
+                    if pet.get("sex") and pet.get("sex") in sex_attributes:
+                        attributes.append(sex_attributes[pet.get("sex")])
+
+                    size_attributes = {
+                        "Small": 268,
+                        "Medium": 266,
+                        "Large": 263,
+                        "Extra-Large": 269,
+                    }
+
+                    if pet.get("size") and pet.get("size") in size_attributes:
+                        attributes.append(size_attributes[pet.get("size")])
+
+                    pet_data = {
+                        "status": "publish",
+                        "title": pet["name"],
+                        "content": pet["description"],
+                        "featured_media": cover_photo_id,
+                        "acf": {
+                            "id": pet.get("id"),
+                            "age": pet.get("age"),
+                            "breed": pet.get("breed"),
+                            "color": pet.get("color"),
+                            "adoptLink": pet.get("adoptLink"),
+                            "internalId": pet.get("internalId"),
+                            "name": pet.get("name"),
+                            "sex": pet.get("sex"),
+                            "size": pet.get("size"),
+                            "species": pet.get("species"),
+                            "source": pet.get("source"),
+                            "status": pet.get("status"),
+                            "video": pet.get("video"),
+                        },
+                        "pet-attributes": attributes,
+                    }
+
+                    for photo_num, photo in enumerate(pet.get("photos", [])):
+                        pet_data["acf"]["photos_{}".format(photo_num)] = photo
+
+                    response = requests.post(
+                        "https://dallaspetsalive.org/wp-json/wp/v2/pet",
+                        headers={
+                            "Authorization": "Bearer {}".format(self.token),
+                        },
+                        json=pet_data,
+                    )
+
+                    if response.status_code != 201:
+                        logger.error("could not create pet {}: {}".format(pet_data, response.text))
                         continue
-
-                attributes = []
-
-                age_attributes = {
-                    "Baby": 264,
-                    "Young": 267,
-                    "Adult": 260,
-                    "Senior": 261,
-                }
-
-                if pet.get("age") and pet.get("age") in age_attributes:
-                    attributes.append(age_attributes[pet.get("age")])
-
-                sex_attributes = {
-                    "Female": 262,
-                    "Male": 265,
-                }
-
-                if pet.get("sex") and pet.get("sex") in sex_attributes:
-                    attributes.append(sex_attributes[pet.get("sex")])
-
-                size_attributes = {
-                    "Small": 268,
-                    "Medium": 266,
-                    "Large": 263,
-                    "Extra-Large": 269,
-                }
-
-                if pet.get("size") and pet.get("size") in size_attributes:
-                    attributes.append(size_attributes[pet.get("size")])
-
-                pet_data = {
-                    "status": "publish",
-                    "title": pet["name"],
-                    "content": pet["description"],
-                    "featured_media": cover_photo_id,
-                    "acf": {
-                        "id": pet.get("id"),
-                        "age": pet.get("age"),
-                        "breed": pet.get("breed"),
-                        "color": pet.get("color"),
-                        "adoptLink": pet.get("adoptLink"),
-                        "internalId": pet.get("internalId"),
-                        "name": pet.get("name"),
-                        "sex": pet.get("sex"),
-                        "size": pet.get("size"),
-                        "species": pet.get("species"),
-                        "source": pet.get("source"),
-                        "status": pet.get("status"),
-                        "video": pet.get("video"),
-                    },
-                    "pet-attributes": attributes,
-                }
-
-                for photo_num, photo in enumerate(pet.get("photos", [])):
-                    pet_data["acf"]["photos_{}".format(photo_num)] = photo
-
-                response = requests.post(
-                    "https://dallaspetsalive.org/wp-json/wp/v2/pet",
-                    headers={
-                        "Authorization": "Bearer {}".format(self.token),
-                    },
-                    json=pet_data,
-                )
-
-                if response.status_code != 201:
-                    logger.error("could not create pet {}: {}".format(pet_data, response.text))
-                    continue
 
     def update_pets(self):
         pets_to_maybe_update = [pet for pet in self.wordpress_ids if pet in self.dynamodb_ids]
 
-        for dynamodb_pet in self.dynamodb_pets:
-            if dynamodb_pet["id"] not in pets_to_maybe_update:
-                continue
-
-            new_pet_data = {}
-
-            for wordpress_pet in self.wordpress_pets:
-                if wordpress_pet.get("acf", {}).get("id") != dynamodb_pet["id"]:
+        with photos_table.batch_writer() as batch:
+            for dynamodb_pet in self.dynamodb_pets:
+                if dynamodb_pet["id"] not in pets_to_maybe_update:
                     continue
 
-                wordpress_title = self.convert_wordpress_content(wordpress_pet.get("title", {}).get("rendered"))
+                new_pet_data = {}
 
-                if wordpress_title != dynamodb_pet["name"].strip():
-                    logger.debug("renaming from {}".format(wordpress_title))
-                    new_pet_data["title"] = dynamodb_pet["name"].strip()
-
-                wordpress_description = self.strip_description(self.convert_wordpress_content(wordpress_pet.get("content", {}).get("rendered")))
-
-                if wordpress_description != self.strip_description(dynamodb_pet["description"].strip()):
-                    logger.debug("updating description from {}".format(wordpress_pet.get("content", {}).get("rendered")))
-                    new_pet_data["content"] = dynamodb_pet["description"].strip()
-
-                last_index = 0
-                for index, photo in enumerate(dynamodb_pet.get("photos", [])):
-                    last_index += 1
-                    if index > 19:
-                        break
-                    if f"photos_{index}" not in wordpress_pet.get("acf", {}):
-                        logger.debug("adding photo {}".format(photo))
-                        if "acf" not in new_pet_data:
-                            new_pet_data["acf"] = {}
-                        new_pet_data["acf"][f"photos_{index}"] = photo
-                    elif wordpress_pet.get("acf", {}).get(f"photos_{index}") != photo:
-                        logger.debug("updating photo {}".format(photo))
-                        if "acf" not in new_pet_data:
-                            new_pet_data["acf"] = {}
-                        new_pet_data["acf"][f"photos_{index}"] = photo
-
-                        if index == 0 and dynamodb_pet.get("coverPhoto"):
-                            logger.debug("updating featured photo {}".format(photo))
-
-                            photo_id = self.upload_featured_photo(dynamodb_pet.get("coverPhoto"))
-                            if photo_id != -1:
-                                new_pet_data["featured_media"] = photo_id
-
-                while wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}"):
-                    logger.debug("removing photo {}".format(wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}")))
-                    if "acf" not in new_pet_data:
-                        new_pet_data["acf"] = {}
-                    new_pet_data["acf"][f"photos_{last_index + 1}"] = ""
-                    last_index += 1
-
-                if dynamodb_pet.get("coverPhoto") and not wordpress_pet.get("featured_media"):
-                    logger.debug("updating featured photo {}".format(dynamodb_pet.get("coverPhoto")))
-
-                    photo_id = self.upload_featured_photo(dynamodb_pet.get("coverPhoto"))
-                    if photo_id != -1:
-                        new_pet_data["featured_media"] = photo_id
-
-                for attribute in wordpress_pet.get("acf", {}):
-                    if "photo" in attribute or attribute in ["description", "coverPhoto"]:
+                for wordpress_pet in self.wordpress_pets:
+                    if wordpress_pet.get("acf", {}).get("id") != dynamodb_pet["id"]:
                         continue
 
-                    wordpress_attribute = wordpress_pet["acf"].get(attribute)
-                    dynamodb_attribute = dynamodb_pet.get(attribute)
+                    wordpress_title = self.convert_wordpress_content(wordpress_pet.get("title", {}).get("rendered"))
 
-                    if not wordpress_attribute and not dynamodb_attribute:
-                        continue
+                    if wordpress_title != dynamodb_pet["name"].strip():
+                        logger.debug("renaming from {}".format(wordpress_title))
+                        new_pet_data["title"] = dynamodb_pet["name"].strip()
 
-                    if wordpress_attribute != dynamodb_attribute:
-                        logger.debug("updating attribute {} for {}".format(
-                            attribute, wordpress_pet.get("title", {}).get("rendered"))
-                        )
+                    wordpress_description = self.strip_description(self.convert_wordpress_content(wordpress_pet.get("content", {}).get("rendered")))
+
+                    if wordpress_description != self.strip_description(dynamodb_pet["description"].strip()):
+                        logger.debug("updating description from {}".format(wordpress_pet.get("content", {}).get("rendered")))
+                        new_pet_data["content"] = dynamodb_pet["description"].strip()
+
+                    last_index = 0
+                    for index, photo in enumerate(dynamodb_pet.get("photos", [])):
+                        last_index += 1
+                        if index > 19:
+                            break
+                        if f"photos_{index}" not in wordpress_pet.get("acf", {}):
+                            logger.debug("adding photo {}".format(photo))
+                            if "acf" not in new_pet_data:
+                                new_pet_data["acf"] = {}
+                            new_pet_data["acf"][f"photos_{index}"] = photo
+                        elif wordpress_pet.get("acf", {}).get(f"photos_{index}") != photo:
+                            logger.debug("updating photo {}".format(photo))
+                            if "acf" not in new_pet_data:
+                                new_pet_data["acf"] = {}
+                            new_pet_data["acf"][f"photos_{index}"] = photo
+
+                    current_featured_photo = self.featured_photos.get(dynamodb_pet["id"])
+                    incoming_current_photo = dynamodb_pet.get("coverPhoto")
+                    if current_featured_photo != incoming_current_photo:
+                        logger.debug("updating featured photo for id {}".format(dynamodb_pet["id"]))
+
+                        photo_id = self.upload_featured_photo(incoming_current_photo)
+                        if photo_id != -1:
+                            new_pet_data["featured_media"] = photo_id
+                            batch.put_item(Item={
+                                "id": dynamodb_pet["id"],
+                                "photo": incoming_current_photo,
+                            })
+
+                    while wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}"):
+                        logger.debug("removing photo {}".format(wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}")))
                         if "acf" not in new_pet_data:
                             new_pet_data["acf"] = {}
-                        new_pet_data["acf"][attribute] = dynamodb_pet.get(attribute)
+                        new_pet_data["acf"][f"photos_{last_index + 1}"] = ""
+                        last_index += 1
 
-                break
-            
-            if new_pet_data:
-                logger.info("updating ID {} data {}".format(dynamodb_pet["id"], new_pet_data))
+                    if dynamodb_pet.get("coverPhoto") and not wordpress_pet.get("featured_media"):
+                        logger.debug("updating featured photo {}".format(dynamodb_pet.get("coverPhoto")))
 
-                response = requests.post(
-                    "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}".format(wordpress_pet["id"]),
-                    headers={
-                        "Authorization": "Bearer {}".format(self.token),
-                    },
-                    json=new_pet_data,
-                )
+                        photo_id = self.upload_featured_photo(dynamodb_pet.get("coverPhoto"))
+                        if photo_id != -1:
+                            new_pet_data["featured_media"] = photo_id
 
-                if response.status_code != 200:
-                    logger.error("could not update pet {}: {}".format(new_pet_data, response.text))
-                    continue
+                    for attribute in wordpress_pet.get("acf", {}):
+                        if "photo" in attribute or attribute in ["description", "coverPhoto"]:
+                            continue
+
+                        wordpress_attribute = wordpress_pet["acf"].get(attribute)
+                        dynamodb_attribute = dynamodb_pet.get(attribute)
+
+                        if not wordpress_attribute and not dynamodb_attribute:
+                            continue
+
+                        if wordpress_attribute != dynamodb_attribute:
+                            logger.debug("updating attribute {} for {}".format(
+                                attribute, wordpress_pet.get("title", {}).get("rendered"))
+                            )
+                            if "acf" not in new_pet_data:
+                                new_pet_data["acf"] = {}
+                            new_pet_data["acf"][attribute] = dynamodb_pet.get(attribute)
+
+                    break
+                
+                if new_pet_data:
+                    logger.info("updating ID {} data {}".format(dynamodb_pet["id"], new_pet_data))
+
+                    response = requests.post(
+                        "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}".format(wordpress_pet["id"]),
+                        headers={
+                            "Authorization": "Bearer {}".format(self.token),
+                        },
+                        json=new_pet_data,
+                    )
+
+                    if response.status_code != 200:
+                        logger.error("could not update pet {}: {}".format(new_pet_data, response.text))
+                        continue
 
     @staticmethod
     def convert_wordpress_content(content: str) -> str:

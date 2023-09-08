@@ -53,7 +53,7 @@ resource "aws_lambda_function" "wordpress_pet_sync" {
   function_name = "wordpress_pet_sync"
   role          = aws_iam_role.wordpress_pet_sync_iam.arn
   handler       = "wordpress_pet_sync.handler"
-  timeout       = 60
+  timeout       = 90
 
   source_code_hash = filebase64sha256(data.archive_file.lambda_wordpress_pet_sync.output_path)
 
@@ -141,6 +141,31 @@ resource "aws_iam_role_policy_attachment" "secrets_lambda_policy" {
   policy_arn = aws_iam_policy.wordpress_sync_get_wordpress_credentials.arn
 }
 
+data "aws_secretsmanager_secret" "slack_alerts_webhook" {
+  name = "slack_alerts_webhook"
+}
+
+resource "aws_iam_policy" "wordpress_sync_get_slack_alerts_webhook" {
+  name = "wordpress_sync_get_slack_alerts_webhook"
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = [
+        "secretsmanager:GetSecretValue",
+      ]
+      Effect = "Allow"
+      Resource = [
+        data.aws_secretsmanager_secret.slack_alerts_webhook.arn,
+      ]
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "secrets_lambda_policy_slack" {
+  role       = aws_iam_role.wordpress_pet_sync_iam.name
+  policy_arn = aws_iam_policy.wordpress_sync_get_slack_alerts_webhook.arn
+}
+
 data "aws_dynamodb_table" "pets-table" {
   name = "Pets"
 }
@@ -154,11 +179,15 @@ resource "aws_iam_policy" "wordpress_dynamodb_pets_get_list" {
         "dynamodb:Query",
         "dynamodb:GetItem",
         "dynamodb:Scan",
+        "dynamodb:BatchWriteItem",
+        "dynamodb:PutItem",
       ]
       Effect = "Allow"
       Resource = [
         data.aws_dynamodb_table.pets-table.arn,
         "${data.aws_dynamodb_table.pets-table.arn}/index/*",
+        aws_dynamodb_table.featured-photos.arn,
+        "${aws_dynamodb_table.featured-photos.arn}/index/*",
       ]
     }]
   })
