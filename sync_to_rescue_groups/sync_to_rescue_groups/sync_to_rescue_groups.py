@@ -535,6 +535,7 @@ def sl_breed_to_rg_breed(breed: str) -> str:
         "Coonhound, Redbone": "Redbone Coonhound",
         "Coonhound, Treeing Walker": "Treeing Walker Coonhound",
         "Corgi, Pembroke": "Corgi",
+        "Corgi, Pembroke Welsh": "Corgi",
         "Corgi, Welsh": "Corgi",
         "Coton De Tulear": "Coton de Tulear",
         "Dachshund, Miniature Long Haired": "Miniature Dachshund",
