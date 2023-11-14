@@ -437,6 +437,10 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
                 color = sl_color_to_rg_color(color, "Cat")
                 pet_row[indexes["color"]] = color
                 cat_count += 1
+            elif species == "Pig":
+                pet_row[indexes["breed"]] = "Pig"
+            elif species == "Rabbit, Domestic":
+                species = "Rabbit"
             else:
                 other_count += 1
 
