@@ -439,8 +439,10 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
                 cat_count += 1
             elif species == "Pig":
                 pet_row[indexes["breed"]] = "Pig"
+                other_count += 1
             elif species == "Rabbit, Domestic":
                 species = "Rabbit"
+                other_count += 1
             else:
                 other_count += 1
 
