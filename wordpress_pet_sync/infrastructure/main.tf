@@ -53,7 +53,7 @@ resource "aws_lambda_function" "wordpress_pet_sync" {
   function_name = "wordpress_pet_sync"
   role          = aws_iam_role.wordpress_pet_sync_iam.arn
   handler       = "wordpress_pet_sync.handler"
-  timeout       = 90
+  timeout       = 300
 
   source_code_hash = filebase64sha256(data.archive_file.lambda_wordpress_pet_sync.output_path)
 

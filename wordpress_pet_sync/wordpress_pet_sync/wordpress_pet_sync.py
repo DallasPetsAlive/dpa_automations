@@ -159,14 +159,14 @@ class WordpressSync:
             if pet.get("acf", {}).get("id") in deleted_pets:
                 logger.debug("deleting {}".format(pet.get("acf", {}).get("id")))
 
-                self.deleted_pets.append(pet["title"]["rendered"])
-
                 response = requests.delete(
                     "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}?force=true".format(pet["id"]),
                     headers={"Authorization": "Bearer {}".format(self.token)},
                 )
                 if response.status_code != 200:
                     logger.error("could not delete pet post {}: {}".format(pet["id"], response.text))
+                    continue
+                self.deleted_pets.append(pet["title"]["rendered"])
 
     def create_pets(self):
         # create pets in wordpress that are in dynamodb but not wordpress
@@ -178,8 +178,6 @@ class WordpressSync:
             for pet in self.dynamodb_pets:
                 if pet["id"] in pets_to_add:
                     logger.debug("creating {}".format(pet["id"]))
-
-                    self.added_pets.append(pet["name"])
 
                     # get the cover photo
                     cover_photo_id = None
@@ -259,6 +257,7 @@ class WordpressSync:
                     if response.status_code != 201:
                         logger.error("could not create pet {}: {}".format(pet_data, response.text))
                         continue
+                    self.added_pets.append(pet["name"])
 
     def update_pets(self):
         pets_to_maybe_update = [pet for pet in self.wordpress_ids if pet in self.dynamodb_ids]
