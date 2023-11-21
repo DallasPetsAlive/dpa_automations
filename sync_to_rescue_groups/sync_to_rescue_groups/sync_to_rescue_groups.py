@@ -418,6 +418,8 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
             pet_row[indexes["dsc"]] = description
 
             breed = pet.get("Breed", "")
+            if breed is None:
+                breed = ""
             breeds = breed.split("/")
             first_breed = breeds[0]
             pet_row[indexes["breed"]] = sl_breed_to_rg_breed(first_breed)
