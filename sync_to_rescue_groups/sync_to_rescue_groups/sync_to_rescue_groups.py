@@ -170,6 +170,7 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
         pets_found = False
         dog_count = 0
         cat_count = 0
+        other_count = 0
         for pet in airtable_pets:
             # if pet isn't available or isn't a supported species, bail
             status: str = pet["fields"].get("Status", "")
@@ -177,7 +178,7 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
                 continue
 
             species: str = pet["fields"].get("Pet Species", "")
-            if species not in ("Dog", "Cat"):
+            if species not in ("Dog", "Cat", "Bird"):
                 continue
 
             pets_found = True
@@ -209,6 +210,11 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
                 cat_count += 1
                 pet_row[indexes["breed"]] = pet["fields"].get("Breed - Cat")
                 pet_row[indexes["color"]] = pet["fields"].get("Color - Cat")
+            else:
+                other_count += 1
+                pet_row[indexes["breed"]] = pet["fields"].get("Breed - Other Species")
+                pet_row[indexes["color"]] = pet["fields"].get("Color - Other Species")
+
 
             pet_row[indexes["ok_dog"]] = pet["fields"].get("Okay with Dogs")
             pet_row[indexes["ok_cat"]] = pet["fields"].get("Okay with Cats")
@@ -261,7 +267,7 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
 
             writer.writerow(pet_row)
 
-        logger.info("Found %d dogs and %d cats adoptable", dog_count, cat_count)
+        logger.info("Found %d dogs, %d cats, and %d others adoptable", dog_count, cat_count, other_count)
 
         return filename
 
