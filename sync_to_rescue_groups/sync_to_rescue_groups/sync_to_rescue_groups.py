@@ -6,6 +6,7 @@ Airtable New Digs and Shelterluv to RescueGroups.org sync.
 import configparser
 import csv
 import ftplib
+import json
 import logging
 from typing import Any, Dict, List, Optional
 
@@ -230,11 +231,12 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
             pet_row[indexes["dsc"]] = description
 
             pictures: List[str] = []
+            picture_map = pet["fields"].get("PictureMap-DoNotModify", "{}")
+            filename_map = json.loads(picture_map)
             url = "https://dpa-media.s3.us-east-2.amazonaws.com/new-digs-photos/"
             for picture in pet["fields"].get("Pictures", []):
                 photo_filename = picture["filename"]
-                photo_filename = photo_filename.replace(" ", "_")
-                photo_filename = photo_filename.replace("%20", "_")
+                photo_filename = filename_map.get(photo_filename, photo_filename)
                 pictures.append(url + pet["id"] + "/" + photo_filename)
 
             if pictures:
