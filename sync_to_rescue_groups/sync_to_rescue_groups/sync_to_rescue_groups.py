@@ -515,6 +515,9 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
             if "14840" in attributes:
                 pet_row[indexes["ok_kid"]] = "Yes"
 
+            if "260578" in attributes or "260579" in attributes:
+                pet_row[indexes["needs"]] = "Yes"
+
             writer.writerow(pet_row)
 
         logger.info(
