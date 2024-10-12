@@ -1,3 +1,4 @@
+import base64
 import boto3
 import botocore
 import html
@@ -24,7 +25,6 @@ def handler(event: Dict[str, Any], _: Any) -> None:
 
     wordpress_sync = WordpressSync()
 
-    wordpress_sync.get_token()
     wordpress_sync.get_dynamodb_pets()
     wordpress_sync.get_dynamodb_featured_photos()
     wordpress_sync.get_wordpress_pets()
@@ -34,7 +34,6 @@ def handler(event: Dict[str, Any], _: Any) -> None:
     wordpress_sync.post_to_slack()
 
 class WordpressSync:
-    token: str
     dynamodb_pets: List[Dict[str, any]]
     wordpress_pets: List[Dict[str, any]]
     dynamodb_ids: List[str]
@@ -44,23 +43,21 @@ class WordpressSync:
     deleted_pets: List[str]
     added_pets: List[str]
 
+    wordpress_header: Dict[str, str]
+
     def __init__(self):
         self.deleted_pets = []
         self.added_pets = []
         self.featured_photos = {}
 
-    def get_token(self) -> None:
         credentials = json.loads(secrets_client.get_secret_value(SecretId="wordpress_credentials")["SecretString"])
         username = credentials["username"]
         password = credentials["password"]
 
-        response = requests.post(
-            "https://dallaspetsalive.org/wp-json/api/v1/token",
-            data={"username": username, "password": password},
-        )
-        if response.status_code != 200:
-            raise Exception("Could not get token: {}".format(response.text))
-        self.token = response.json()["jwt_token"]
+        wordpress_credentials = username + ":" + password
+        token = base64.b64encode(wordpress_credentials.encode())
+        self.wordpress_header = {"Authorization": "Basic " + token.decode('utf-8')}
+
 
     def get_dynamodb_pets(self) -> None:
         pets = []
@@ -134,7 +131,7 @@ class WordpressSync:
         offset = 0
         while response := requests.get(
             "https://dallaspetsalive.org/wp-json/wp/v2/pet?offset={}".format(offset),
-            headers={"Authorization": "Bearer {}".format(self.token)}
+            headers=self.wordpress_header,
         ).json():
             pets.extend(response)
             offset += len(response)
@@ -161,7 +158,7 @@ class WordpressSync:
 
                 response = requests.delete(
                     "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}?force=true".format(pet["id"]),
-                    headers={"Authorization": "Bearer {}".format(self.token)},
+                    headers=self.wordpress_header,
                 )
                 if response.status_code != 200:
                     logger.error("could not delete pet post {}: {}".format(pet["id"], response.text))
@@ -248,9 +245,7 @@ class WordpressSync:
 
                     response = requests.post(
                         "https://dallaspetsalive.org/wp-json/wp/v2/pet",
-                        headers={
-                            "Authorization": "Bearer {}".format(self.token),
-                        },
+                        headers=self.wordpress_header,
                         json=pet_data,
                     )
 
@@ -353,9 +348,7 @@ class WordpressSync:
 
                     response = requests.post(
                         "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}".format(wordpress_pet["id"]),
-                        headers={
-                            "Authorization": "Bearer {}".format(self.token),
-                        },
+                        headers=self.wordpress_header,
                         json=new_pet_data,
                     )
 
@@ -384,6 +377,9 @@ class WordpressSync:
         return description
 
     def upload_featured_photo(self, photoUrl: str) -> int:
+        if not photoUrl:
+            return -1
+
         response = requests.get(photoUrl, stream=True)
         if response.status_code != 200:
             logger.error("could not get cover photo {}: {}".format(photoUrl, response.text))
@@ -398,9 +394,9 @@ class WordpressSync:
         response = requests.post(
             "https://dallaspetsalive.org/wp-json/wp/v2/media",
             headers={
-                "Authorization": "Bearer {}".format(self.token),
                 "Content-Disposition": "attachment; filename={}".format(filename),
                 "Content-Type": content_type[0],
+                **self.wordpress_header,
             },
             data=cover_photo,
         )
