@@ -3,6 +3,7 @@ AWS lambda handler.
 
 Airtable New Digs and Shelterluv to RescueGroups.org sync.
 """
+
 import configparser
 import csv
 import ftplib
@@ -83,7 +84,7 @@ def handler(event: Dict[str, Any], _: Any) -> None:
     except Exception as e:
         logger.exception("Exception occurred.")
         raise Exception from e
-        
+
     logger.debug("Done")
 
 
@@ -91,13 +92,12 @@ def get_airtable_pets() -> Any:
     """Get the new digs pets from Airtable."""
     url = "https://api.airtable.com/v0/" + config["airtable"]["BASE"] + "/Pets"
     headers = {"Authorization": "Bearer " + config["airtable"]["API_KEY"]}
-    
+
     quit = False
     pets = []
     offset = None
-    
+
     while not quit:
-        
         params = {}
 
         if offset:
@@ -112,14 +112,14 @@ def get_airtable_pets() -> Any:
             logger.error("URL: %s", url)
             logger.error("Headers: %s", str(headers))
             raise Exception
-    
+
         airtable_response = response.json()
-        
+
         if not airtable_response.get("offset"):
             quit = True
         else:
             offset = airtable_response["offset"]
-        
+
         pets += airtable_response["records"]
 
     logger.info("got {} pets from Airtable".format(len(pets)))
@@ -216,7 +216,6 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
                 pet_row[indexes["breed"]] = pet["fields"].get("Breed - Other Species")
                 pet_row[indexes["color"]] = pet["fields"].get("Color - Other Species")
 
-
             pet_row[indexes["ok_dog"]] = pet["fields"].get("Okay with Dogs")
             pet_row[indexes["ok_cat"]] = pet["fields"].get("Okay with Cats")
             pet_row[indexes["ok_kid"]] = pet["fields"].get("Okay with Kids")
@@ -269,7 +268,12 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
 
             writer.writerow(pet_row)
 
-        logger.info("Found %d dogs, %d cats, and %d others adoptable", dog_count, cat_count, other_count)
+        logger.info(
+            "Found %d dogs, %d cats, and %d others adoptable",
+            dog_count,
+            cat_count,
+            other_count,
+        )
 
         return filename
 
@@ -508,7 +512,7 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
 
             if "14842" in attributes:
                 pet_row[indexes["ok_dog"]] = "Yes"
-            
+
             if "14841" in attributes:
                 pet_row[indexes["ok_cat"]] = "Yes"
 
@@ -521,12 +525,14 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
             writer.writerow(pet_row)
 
         logger.info(
-            "Found %d dogs, %d cats, %d other adoptable", 
-            dog_count, cat_count, other_count,
+            "Found %d dogs, %d cats, %d other adoptable",
+            dog_count,
+            cat_count,
+            other_count,
         )
 
         return filename
-    
+
 
 def sl_breed_to_rg_breed(breed: str) -> str:
     breed_map = {
@@ -707,11 +713,10 @@ def sl_breed_to_rg_breed(breed: str) -> str:
         "Water Dog, Portuguese": "Portuguese Water Dog",
         "Wolfhound, Irish": "Irish Wolfhound",
         "Xoloitzcuintle (Mexican Hairless)": "Xoloitzcuintli / Mexican Hairless",
-
-        # CATS      
+        # CATS
         "American Bobtail": "Bobtail",
-        "Domestic Longhair": "Domestic Long Hair",       
-        "Domestic Shorthair": "Domestic Short Hair",  
+        "Domestic Longhair": "Domestic Long Hair",
+        "Domestic Shorthair": "Domestic Short Hair",
         "Havana Brown": "Havana",
         "Laperm": "LaPerm",
         "Sphynx": "Sphynx (hairless cat)",

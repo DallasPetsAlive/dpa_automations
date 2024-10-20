@@ -165,7 +165,6 @@ class WordpressSync:
                 logger.error("could not delete pet post {}: {}".format(pet["id"], response.text))
                 continue
             self.deleted_pets.append(pet["title"]["rendered"])
-            
 
         if not deleted_pets:
             logger.info("no pets to delete")

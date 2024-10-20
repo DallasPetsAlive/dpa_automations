@@ -8,11 +8,11 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 3.27"
+      version = "5.72.1"
     }
   }
 
-  required_version = ">= 0.14.9"
+  required_version = ">= 1.9.8"
 }
 
 provider "aws" {
@@ -57,7 +57,7 @@ resource "aws_lambda_function" "wordpress_pet_sync" {
 
   source_code_hash = filebase64sha256(data.archive_file.lambda_wordpress_pet_sync.output_path)
 
-  runtime = "python3.9"
+  runtime = "python3.12"
 
   layers = [data.aws_lambda_layer_version.requests_layer.arn, data.aws_lambda_layer_version.api_layer.arn]
 }

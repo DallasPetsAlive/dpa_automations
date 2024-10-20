@@ -5,6 +5,9 @@ config.ini
 *layer*
 sync_to_rescue_groups/tmp/
 tmp/
+.ruff_cache/
+.DS_Store
+uv.lock
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

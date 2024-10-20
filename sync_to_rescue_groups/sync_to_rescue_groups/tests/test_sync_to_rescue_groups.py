@@ -1,4 +1,5 @@
 """Test Airtable to RescueGroups.org sync."""
+
 import configparser
 import csv
 

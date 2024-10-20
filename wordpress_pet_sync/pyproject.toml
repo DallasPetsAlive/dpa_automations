@@ -1,6 +1,20 @@
-[build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+[project]
+name = "wordpress_pet_sync"
+version = "0.1.0"
+description = "sync pets from dynamodb to wordpress"
+requires-python = ">=3.12"
+dependencies = [
+  "cerealbox>=0.1.2",
+  "requests>=2.32.3",
+]
+
+[tool.uv]
+dev-dependencies = [
+  "mypy>=1.12.1",
+  "pre-commit>=4.0.1",
+  "ruff>=0.7.0",
+  "types-requests>=2.32",
+]
 
 [tool.ruff]
 line-length = 120

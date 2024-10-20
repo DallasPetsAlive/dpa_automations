@@ -10,10 +10,18 @@ def test_get_token():
         expected_params = {
             "SecretId": "wordpress_credentials",
         }
-        stub.add_response("get_secret_value", {"SecretString": json.dumps({
-            "username": "abc",
-            "password": "def",
-        })}, expected_params)
+        stub.add_response(
+            "get_secret_value",
+            {
+                "SecretString": json.dumps(
+                    {
+                        "username": "abc",
+                        "password": "def",
+                    }
+                )
+            },
+            expected_params,
+        )
 
         with requests_mock.Mocker() as requests_mocker:
             requests_mocker.post(
@@ -88,6 +96,7 @@ def test_get_dynamodb_pets():
             {"source": "shelterluv", "name": "Joey"},
         ]
 
+
 def test_get_wordpress_pets():
     with requests_mock.Mocker() as requests_mocker:
         requests_mocker.get(
@@ -106,6 +115,7 @@ def test_get_wordpress_pets():
         assert requests_mocker.call_count == 2
 
         assert sync.wordpress_pets == [{"name": "Fido"}]
+
 
 def test_delete_pets():
     with requests_mock.Mocker() as requests_mocker:
@@ -146,6 +156,7 @@ def test_delete_pets():
         sync.delete_pets()
 
         assert requests_mocker.call_count == 1
+
 
 def test_thing():
     sync = wordpress_pet_sync.WordpressSync()

@@ -33,7 +33,6 @@ def handler(event: Dict[str, Any], _: Any) -> None:
 
 
 def get_shelterluv_pets(shelterluv_key: str) -> Dict[str, Any]:
-
     headers: Dict[str, str] = {"x-api-key": shelterluv_key}
     offset = 0
     total_count = 0
@@ -42,7 +41,6 @@ def get_shelterluv_pets(shelterluv_key: str) -> Dict[str, Any]:
     url = "https://www.shelterluv.com/api/v1/animals?status_type=publishable"
 
     while response := requests.get(url, headers=headers):
-
         # check http response code
         if response.status_code != 200:
             logger.error("invalid response code")
@@ -118,7 +116,6 @@ def shelterluv_to_csv(shelterluv_pets: Dict[str, Any]) -> List[Dict[str, Any]]:
     animals = []
 
     for id, fields in shelterluv_pets.items():
-
         if fields.get("Breed") is None:
             logger.error("no breed found for animal {}".format(id))
             continue
