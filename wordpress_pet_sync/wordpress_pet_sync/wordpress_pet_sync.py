@@ -6,7 +6,6 @@ import json
 import logging
 import mimetypes
 import re
-from collections import Counter
 from typing import Any, Dict, List
 
 import requests
@@ -144,7 +143,7 @@ class WordpressSync:
             id = pet.get("acf", {}).get("id")
             if id in self.wordpress_ids:
                 self.duplicate_wordpress_pets.append(pet)
-            self.wordpress_ids.append(pet.get("acf", {}).get("id"))
+            self.wordpress_ids.append(id)
 
         logger.info("got {} pets from wordpress".format(len(pets)))
 
