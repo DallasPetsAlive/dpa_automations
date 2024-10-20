@@ -6,6 +6,7 @@ import json
 import logging
 import mimetypes
 import re
+from collections import Counter
 from typing import Any, Dict, List
 
 import requests
@@ -13,6 +14,7 @@ from cerealbox.dynamo import from_dynamodb_json
 
 logger = logging.getLogger()
 logger.setLevel(logging.DEBUG)
+logging.getLogger("botocore").setLevel(logging.INFO)
 
 secrets_client = boto3.client("secretsmanager")
 dynamodb_client = boto3.client("dynamodb")
@@ -33,12 +35,14 @@ def handler(event: Dict[str, Any], _: Any) -> None:
     wordpress_sync.update_pets()
     wordpress_sync.post_to_slack()
 
+
 class WordpressSync:
     dynamodb_pets: List[Dict[str, any]]
     wordpress_pets: List[Dict[str, any]]
     dynamodb_ids: List[str]
     wordpress_ids: List[str]
     featured_photos: Dict[str, str]
+    duplicate_wordpress_pets: List[Dict[str, any]]
 
     deleted_pets: List[str]
     added_pets: List[str]
@@ -49,6 +53,7 @@ class WordpressSync:
         self.deleted_pets = []
         self.added_pets = []
         self.featured_photos = {}
+        self.duplicate_wordpress_pets = []
 
         credentials = json.loads(secrets_client.get_secret_value(SecretId="wordpress_credentials")["SecretString"])
         username = credentials["username"]
@@ -56,8 +61,7 @@ class WordpressSync:
 
         wordpress_credentials = username + ":" + password
         token = base64.b64encode(wordpress_credentials.encode())
-        self.wordpress_header = {"Authorization": "Basic " + token.decode('utf-8')}
-
+        self.wordpress_header = {"Authorization": "Basic " + token.decode("utf-8")}
 
     def get_dynamodb_pets(self) -> None:
         pets = []
@@ -130,27 +134,44 @@ class WordpressSync:
 
         offset = 0
         while response := requests.get(
-            "https://dallaspetsalive.org/wp-json/wp/v2/pet?offset={}".format(offset),
+            "https://dallaspetsalive.org/wp-json/wp/v2/pet?offset={}&order=asc".format(offset),
             headers=self.wordpress_header,
         ).json():
             pets.extend(response)
             offset += len(response)
 
         for pet in pets:
+            id = pet.get("acf", {}).get("id")
+            if id in self.wordpress_ids:
+                self.duplicate_wordpress_pets.append(pet)
             self.wordpress_ids.append(pet.get("acf", {}).get("id"))
 
         logger.info("got {} pets from wordpress".format(len(pets)))
 
         self.wordpress_pets = pets
-        
+
     def delete_pets(self):
         # delete any wordpress pets that are no longer in dynamodb
         deleted_pets = [pet for pet in self.wordpress_ids if pet not in self.dynamodb_ids]
 
+        # delete any duplicate pets
+        for pet in self.duplicate_wordpress_pets:
+            logger.info("deleting duplicate pet {}".format(pet.get("slug")))
+
+            response = requests.delete(
+                "https://dallaspetsalive.org/wp-json/wp/v2/pet/{}?force=true".format(pet["id"]),
+                headers=self.wordpress_header,
+            )
+            if response.status_code != 200:
+                logger.error("could not delete pet post {}: {}".format(pet["id"], response.text))
+                continue
+            self.deleted_pets.append(pet["title"]["rendered"])
+            
+
         if not deleted_pets:
             logger.info("no pets to delete")
             return
-        
+
         logger.info("deleting {} pets".format(len(deleted_pets)))
         for pet in self.wordpress_pets:
             if pet.get("acf", {}).get("id") in deleted_pets:
@@ -182,10 +203,12 @@ class WordpressSync:
                         cover_photo_id = self.upload_featured_photo(coverPhoto)
                         if cover_photo_id == -1:
                             continue
-                        batch.put_item(Item={
-                            "id": pet["id"],
-                            "photo": coverPhoto,
-                        })
+                        batch.put_item(
+                            Item={
+                                "id": pet["id"],
+                                "photo": coverPhoto,
+                            }
+                        )
 
                     attributes = []
 
@@ -274,10 +297,14 @@ class WordpressSync:
                         logger.debug("renaming from {}".format(wordpress_title))
                         new_pet_data["title"] = dynamodb_pet["name"].strip()
 
-                    wordpress_description = self.strip_description(self.convert_wordpress_content(wordpress_pet.get("content", {}).get("rendered")))
+                    wordpress_description = self.strip_description(
+                        self.convert_wordpress_content(wordpress_pet.get("content", {}).get("rendered"))
+                    )
 
                     if wordpress_description != self.strip_description(dynamodb_pet["description"].strip()):
-                        logger.debug("updating description from {}".format(wordpress_pet.get("content", {}).get("rendered")))
+                        logger.debug(
+                            "updating description from {}".format(wordpress_pet.get("content", {}).get("rendered"))
+                        )
                         new_pet_data["content"] = dynamodb_pet["description"].strip()
 
                     last_index = 0
@@ -304,13 +331,17 @@ class WordpressSync:
                         photo_id = self.upload_featured_photo(incoming_current_photo)
                         if photo_id != -1:
                             new_pet_data["featured_media"] = photo_id
-                            batch.put_item(Item={
-                                "id": dynamodb_pet["id"],
-                                "photo": incoming_current_photo,
-                            })
+                            batch.put_item(
+                                Item={
+                                    "id": dynamodb_pet["id"],
+                                    "photo": incoming_current_photo,
+                                }
+                            )
 
                     while wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}"):
-                        logger.debug("removing photo {}".format(wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}")))
+                        logger.debug(
+                            "removing photo {}".format(wordpress_pet.get("acf", {}).get(f"photos_{last_index + 1}"))
+                        )
                         if "acf" not in new_pet_data:
                             new_pet_data["acf"] = {}
                         new_pet_data["acf"][f"photos_{last_index + 1}"] = ""
@@ -324,7 +355,10 @@ class WordpressSync:
                             new_pet_data["featured_media"] = photo_id
 
                     for attribute in wordpress_pet.get("acf", {}):
-                        if "photo" in attribute or attribute in ["description", "coverPhoto"]:
+                        if "photo" in attribute or attribute in [
+                            "description",
+                            "coverPhoto",
+                        ]:
                             continue
 
                         wordpress_attribute = wordpress_pet["acf"].get(attribute)
@@ -334,15 +368,18 @@ class WordpressSync:
                             continue
 
                         if wordpress_attribute != dynamodb_attribute:
-                            logger.debug("updating attribute {} for {}".format(
-                                attribute, wordpress_pet.get("title", {}).get("rendered"))
+                            logger.debug(
+                                "updating attribute {} for {}".format(
+                                    attribute,
+                                    wordpress_pet.get("title", {}).get("rendered"),
+                                )
                             )
                             if "acf" not in new_pet_data:
                                 new_pet_data["acf"] = {}
                             new_pet_data["acf"][attribute] = dynamodb_pet.get(attribute)
 
                     break
-                
+
                 if new_pet_data:
                     logger.info("updating ID {} data {}".format(dynamodb_pet["id"], new_pet_data))
 
@@ -359,8 +396,8 @@ class WordpressSync:
     @staticmethod
     def convert_wordpress_content(content: str) -> str:
         content = html.unescape(content)
-        content = content.replace("”", "\"")
-        content = content.replace("“", "\"")
+        content = content.replace("”", '"')
+        content = content.replace("“", '"')
         content = content.replace("’", "'")
         content = content.replace("</p>\n<p>", "\\n\\n")
         content = content.replace("<p>", "")
@@ -373,7 +410,7 @@ class WordpressSync:
         description = description.replace("\\n", "")
         description = description.replace("\\r", "")
         description = description.replace("<br", "")
-        description = re.sub(r'\W+', '', description)
+        description = re.sub(r"\W+", "", description)
         return description
 
     def upload_featured_photo(self, photoUrl: str) -> int:
@@ -404,13 +441,13 @@ class WordpressSync:
         if response.status_code != 201:
             logger.error("could not upload cover photo {}: {}".format(photoUrl, response.text))
             return -1
-    
+
         return response.json()["id"]
-    
+
     def post_to_slack(self):
         if not self.added_pets and not self.deleted_pets:
             return
-        
+
         message = {
             "blocks": [
                 {
@@ -418,7 +455,7 @@ class WordpressSync:
                     "text": {
                         "type": "mrkdwn",
                         "text": "The following changes were sent to Wordpress:",
-                    }
+                    },
                 },
                 {
                     "type": "divider",
@@ -427,25 +464,31 @@ class WordpressSync:
         }
 
         if self.added_pets:
-            message["blocks"].append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "*Added Pets*\n{}".format("\n".join(self.added_pets)),
-                },
-            })
+            message["blocks"].append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "*Added Pets*\n{}".format("\n".join(self.added_pets)),
+                    },
+                }
+            )
             if self.deleted_pets:
-                message["blocks"].append({
-                    "type": "divider",
-                })
+                message["blocks"].append(
+                    {
+                        "type": "divider",
+                    }
+                )
         if self.deleted_pets:
-            message["blocks"].append({
-                "type": "section",
-                "text": {
-                    "type": "mrkdwn",
-                    "text": "*Deleted Pets*\n{}".format("\n".join(self.deleted_pets)),
-                },
-            })
+            message["blocks"].append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": "*Deleted Pets*\n{}".format("\n".join(self.deleted_pets)),
+                    },
+                }
+            )
 
         webhook = json.loads(secrets_client.get_secret_value(SecretId="slack_alerts_webhook")["SecretString"])
         url = webhook.get("url")
