@@ -49,5 +49,5 @@ def handler(event: Dict[str, Any], _: Any) -> None:
             },
         },
         ReplyToAddresses=[email],
-        Source="webapps@dallaspetsalive.org",
+        Source=f"{name} <webapps@dallaspetsalive.org>",
     )
