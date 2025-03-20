@@ -108,11 +108,11 @@ resource "aws_lambda_function_event_invoke_config" "sync_to_rescue_groups_invoke
 
 resource "null_resource" "layer_creation" {
   triggers = {
-    always_run = timestamp()
+    zip_changed = filesha256("${path.module}/../pyproject.toml")
   }
 
   provisioner "local-exec" {
-   command = "mkdir -p ${path.module}/requests_layer/python && pip install requests==2.28.2 -t ${path.module}/requests_layer/python"
+   command = "./zip_packages.sh"
   }
 }
 
@@ -120,8 +120,8 @@ data "archive_file" "requests_zip" {
   type = "zip"
   depends_on = [null_resource.layer_creation]
 
-  source_dir  = "${path.module}/requests_layer"
-  output_path = "${path.module}/requests.zip"
+  source_dir  = "${path.module}/python_layer"
+  output_path = "${path.module}/python_layer.zip"
 }
 
 resource "aws_lambda_layer_version" "sync_to_rescue_groups_layer" {
@@ -135,28 +135,6 @@ resource "aws_lambda_layer_version" "sync_to_rescue_groups_layer" {
 resource "aws_cloudwatch_log_group" "sync_to_rescue_groups_log_group" {
   name              = "/aws/lambda/sync_to_rescue_groups"
   retention_in_days = 90
-}
-
-resource "aws_iam_policy" "sync_to_rescue_groups_logging_policy" {
-  name   = "sync_to_rescue_groups_logging_policy"
-  policy = jsonencode({
-    "Version" : "2012-10-17",
-    "Statement" : [
-      {
-        Action : [
-          "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ],
-        Effect : "Allow",
-        Resource : "arn:aws:logs:*:*:*"
-      }
-    ]
-  })
-}
-
-resource "aws_iam_role_policy_attachment" "sync_to_rescue_groups_logging_policy_attachment" {
-  role = aws_iam_role.sync_to_rescue_groups_iam.id
-  policy_arn = aws_iam_policy.sync_to_rescue_groups_logging_policy.arn
 }
 
 resource "aws_cloudwatch_event_rule" "sync_to_rescue_groups_event_rule" {
@@ -182,23 +160,38 @@ data "aws_secretsmanager_secret" "shelterluv_api_key" {
   name = "shelterluv_api_key"
 }
 
-resource "aws_iam_policy" "rg_sync_get_shelterluv_api_key" {
-  name = "rg_sync_get_shelterluv_api_key"
+resource "aws_iam_policy" "rg_sync_policy" {
+  name = "rg_sync_policy"
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [{
-      Action = [
-        "secretsmanager:GetSecretValue",
-      ]
-      Effect = "Allow"
-      Resource = [
-        data.aws_secretsmanager_secret.shelterluv_api_key.arn,
-      ]
-    }]
+    Statement = [
+      {
+        Action = [
+          "secretsmanager:GetSecretValue",
+        ]
+        Effect = "Allow"
+        Resource = [
+          data.aws_secretsmanager_secret.shelterluv_api_key.arn,
+        ]
+      }, {
+        Action = [
+          "logs:CreateLogStream",
+          "logs:PutLogEvents"
+        ]
+        Effect = "Allow"
+        Resource = "arn:aws:logs:*:*:*"
+      }, {
+        Action = [
+          "s3:PutObject",
+        ]
+        Effect = "Allow"
+        Resource = "${aws_s3_bucket.sync_to_rescue_groups_bucket.arn}/*"
+      }
+    ]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "secrets_lambda_policy" {
+resource "aws_iam_role_policy_attachment" "sync_lambda_policy" {
   role       = aws_iam_role.sync_to_rescue_groups_iam.name
-  policy_arn = aws_iam_policy.rg_sync_get_shelterluv_api_key.arn
+  policy_arn = aws_iam_policy.rg_sync_policy.arn
 }

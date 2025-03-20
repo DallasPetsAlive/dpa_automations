@@ -21,6 +21,7 @@ config = configparser.ConfigParser()
 config.read("config.ini")
 
 secrets_client = boto3.client("secretsmanager")
+# s3_client = boto3.client("s3")
 
 CSV_HEADERS = [
     "externalID",
@@ -78,6 +79,13 @@ def handler(event: Dict[str, Any], _: Any) -> None:
 
         # create CSV of Shelterluv pets
         csv_file_sl: str = create_sl_csv_file(shelterluv_pets)
+
+        # upload the file to s3 for debugging
+        # s3_client.upload_file(
+        #     str(config["local"]["FILEPATH"]) + csv_file_sl,
+        #     "dpa-rescue-groups-sync",
+        #     "shelterluv_pets.csv",
+        # )
 
         # upload to rescuegroups.org
         upload_to_rescue_groups(csv_file_sl)
