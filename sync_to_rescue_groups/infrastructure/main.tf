@@ -59,21 +59,6 @@ resource "aws_iam_role" "sync_to_rescue_groups_iam" {
       }
     ]
   })
-
-  inline_policy {
-    name = "sync_to_rescue_groups_iam_inline_policy"
-
-    policy = jsonencode({
-      Version = "2012-10-17"
-      Statement = [
-        {
-          Action   = ["sns:Publish*"]
-          Effect   = "Allow"
-          Resource = "arn:aws:sns:us-east-2:832971646995:Default_CloudWatch_Alarms_Topic"
-        },
-      ]
-    })
-  }
 }
 
 resource "aws_lambda_function" "sync_to_rescue_groups" {
@@ -91,7 +76,7 @@ resource "aws_lambda_function" "sync_to_rescue_groups" {
   source_code_hash = data.archive_file.sync_to_rescue_groups_zip.output_base64sha256
 
   runtime = "python3.9"
-  timeout = 60
+  timeout = 120
 
   layers = [aws_lambda_layer_version.sync_to_rescue_groups_layer.arn]
 }
@@ -160,32 +145,76 @@ data "aws_secretsmanager_secret" "shelterluv_api_key" {
   name = "shelterluv_api_key"
 }
 
+resource "aws_s3_bucket" "shelterluv_photos_bucket" {
+  bucket = "dpa-shelterluv-photos"
+}
+
+resource "aws_s3_bucket_public_access_block" "shelterluv_photos_bucket_public_access_block" {
+  bucket = aws_s3_bucket.shelterluv_photos_bucket.id
+
+  block_public_acls   = false
+  block_public_policy = false
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "shelterluv_photos_bucket_lifecycle" {
+  bucket = aws_s3_bucket.shelterluv_photos_bucket.id
+
+  rule {
+    id = "shelterluv_photos_bucket_lifecycle_rule"
+
+    expiration {
+      days = 90
+    }
+
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_ownership_controls" "shelterluv_photos_bucket_ownership_controls" {
+  bucket = aws_s3_bucket.shelterluv_photos_bucket.id
+
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
 resource "aws_iam_policy" "rg_sync_policy" {
   name = "rg_sync_policy"
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
       {
-        Action = [
+        Action    = [
           "secretsmanager:GetSecretValue",
         ]
-        Effect = "Allow"
-        Resource = [
+        Effect    = "Allow"
+        Resource  = [
           data.aws_secretsmanager_secret.shelterluv_api_key.arn,
         ]
       }, {
-        Action = [
+        Action    = [
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Effect = "Allow"
-        Resource = "arn:aws:logs:*:*:*"
+        Effect    = "Allow"
+        Resource  = "arn:aws:logs:*:*:*"
       }, {
-        Action = [
+        Action    = [
           "s3:PutObject",
         ]
-        Effect = "Allow"
-        Resource = "${aws_s3_bucket.sync_to_rescue_groups_bucket.arn}/*"
+        Effect    = "Allow"
+        Resource  = "${aws_s3_bucket.sync_to_rescue_groups_bucket.arn}/*"
+      }, {
+        Action    = ["sns:Publish*"]
+        Effect    = "Allow"
+        Resource  = "arn:aws:sns:us-east-2:832971646995:Default_CloudWatch_Alarms_Topic"
+      }, {
+        Action   = [
+          "s3:PutObject",
+          "s3:GetObjectAttributes",
+        ]
+        Effect   = "Allow"
+        Resource = "${aws_s3_bucket.shelterluv_photos_bucket.arn}/*"
       }
     ]
   })

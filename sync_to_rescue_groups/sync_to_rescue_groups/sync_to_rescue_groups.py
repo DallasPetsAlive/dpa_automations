@@ -10,6 +10,7 @@ import ftplib
 import json
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import boto3
 import requests
@@ -21,7 +22,7 @@ config = configparser.ConfigParser()
 config.read("config.ini")
 
 secrets_client = boto3.client("secretsmanager")
-# s3_client = boto3.client("s3")
+s3_client = boto3.client("s3")
 
 CSV_HEADERS = [
     "externalID",
@@ -497,6 +498,7 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
                 pet_row[indexes["fixed"]] = "Yes"
 
             photos = pet.get("Photos", [])
+            photos = deal_with_sl_photos(photos)
             if len(photos) > 0:
                 pet_row[indexes["photo1"]] = photos[0]
             if len(photos) > 1:
@@ -540,6 +542,40 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
         )
 
         return filename
+
+
+def deal_with_sl_photos(photos: List[Dict[str, Any]]) -> List[str]:
+    """Deal with Shelterluv photos."""
+    photo_list: List[str] = []
+    for photo in photos[:4]:
+        parts = urlparse(photo)
+        path = parts.path
+
+        # see if photo exists in s3
+        try:
+            s3_client.get_object_attributes(
+                Bucket="dpa-shelterluv-photos",
+                Key=path[1:],
+                ObjectAttributes=["Checksum"],
+            )
+
+        except s3_client.exceptions.NoSuchKey:
+            sl_response = requests.get(photo)
+            if sl_response.status_code == 200:
+                s3_client.put_object(
+                    Bucket="dpa-shelterluv-photos",
+                    Key=path[1:],
+                    Body=sl_response.content,
+                    ACL="public-read",
+                )
+            else:
+                logger.warning("Failed to get photo from Shelterluv: %s", photo)
+
+        photo_list.append(
+            "https://dpa-shelterluv-photos.s3.us-east-2.amazonaws.com" + path
+        )
+
+    return photo_list
 
 
 def sl_breed_to_rg_breed(breed: str) -> str:
