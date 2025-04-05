@@ -78,8 +78,11 @@ def handler(event: Dict[str, Any], _: Any) -> None:
         # get the pets from Shelterluv
         shelterluv_pets: Dict[str, Any] = get_shelterluv_pets()
 
+        # get the current photos in S3
+        shelterluv_photos: List[str] = get_shelterluv_photos()
+
         # create CSV of Shelterluv pets
-        csv_file_sl: str = create_sl_csv_file(shelterluv_pets)
+        csv_file_sl: str = create_sl_csv_file(shelterluv_pets, shelterluv_photos)
 
         # upload the file to s3 for debugging
         # s3_client.upload_file(
@@ -377,7 +380,22 @@ def get_shelterluv_pets() -> List[Dict[str, Any]]:
     return animals
 
 
-def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
+def get_shelterluv_photos() -> List[str]:
+    """Get the current photos in S3."""
+    bucket = "dpa-shelterluv-photos"
+    paginator = s3_client.get_paginator("list_objects_v2")
+    pages = paginator.paginate(Bucket=bucket)
+
+    photos: List[str] = []
+    for page in pages:
+        for obj in page.get("Contents", []):
+            photos.append(obj["Key"])
+
+    logger.info("Found %d photos in S3", len(photos))
+    return photos
+
+
+def create_sl_csv_file(pets: List[Dict[str, Any]], shelterluv_photos: List[str]) -> str:
     """Create a CSV file of shelterluv pets."""
     # pylint: disable=too-many-statements
     filename: str = "pets.csv"
@@ -498,7 +516,7 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
                 pet_row[indexes["fixed"]] = "Yes"
 
             photos = pet.get("Photos", [])
-            photos = deal_with_sl_photos(photos)
+            photos = deal_with_sl_photos(photos, shelterluv_photos)
             if len(photos) > 0:
                 pet_row[indexes["photo1"]] = photos[0]
             if len(photos) > 1:
@@ -544,22 +562,17 @@ def create_sl_csv_file(pets: List[Dict[str, Any]]) -> str:
         return filename
 
 
-def deal_with_sl_photos(photos: List[Dict[str, Any]]) -> List[str]:
+def deal_with_sl_photos(
+    photos: List[Dict[str, Any]], s3_photos: List[str]
+) -> List[str]:
     """Deal with Shelterluv photos."""
     photo_list: List[str] = []
     for photo in photos[:4]:
         parts = urlparse(photo)
         path = parts.path
 
-        # see if photo exists in s3
-        try:
-            s3_client.get_object_attributes(
-                Bucket="dpa-shelterluv-photos",
-                Key=path[1:],
-                ObjectAttributes=["Checksum"],
-            )
-
-        except s3_client.exceptions.NoSuchKey:
+        if path[1:] not in s3_photos:
+            logger.debug("Uploading photo to S3: %s", path)
             sl_response = requests.get(photo)
             if sl_response.status_code == 200:
                 s3_client.put_object(

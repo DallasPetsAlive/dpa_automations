@@ -212,9 +212,13 @@ resource "aws_iam_policy" "rg_sync_policy" {
         Action   = [
           "s3:PutObject",
           "s3:GetObjectAttributes",
+          "s3:ListBucket",
         ]
         Effect   = "Allow"
-        Resource = "${aws_s3_bucket.shelterluv_photos_bucket.arn}/*"
+        Resource = [
+          "${aws_s3_bucket.shelterluv_photos_bucket.arn}/*",
+          aws_s3_bucket.shelterluv_photos_bucket.arn,
+        ]
       }
     ]
   })
