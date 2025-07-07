@@ -136,6 +136,10 @@ class WordpressSync:
             "https://dallaspetsalive.org/wp-json/wp/v2/pet?offset={}&order=asc".format(offset),
             headers=self.wordpress_header,
         ).json():
+            if "status" in response and response["status"] == "error":
+                raise Exception(
+                    "Error fetching pets from Wordpress: {}".format(response.get("error_description", "Unknown error"))
+                )
             pets.extend(response)
             offset += len(response)
 
@@ -299,7 +303,9 @@ class WordpressSync:
                         self.convert_wordpress_content(wordpress_pet.get("content", {}).get("rendered"))
                     )
 
-                    if wordpress_description != self.strip_description(dynamodb_pet["description"].strip()):
+                    if dynamodb_pet["description"] and wordpress_description != self.strip_description(
+                        dynamodb_pet["description"].strip()
+                    ):
                         logger.debug(
                             "updating description from {}".format(wordpress_pet.get("content", {}).get("rendered"))
                         )
