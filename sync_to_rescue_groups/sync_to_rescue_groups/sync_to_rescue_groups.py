@@ -16,7 +16,7 @@ import boto3
 import requests
 
 logger: logging.Logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 config = configparser.ConfigParser()
 config.read("config.ini")
@@ -68,18 +68,26 @@ def handler(event: Dict[str, Any], _: Any) -> None:
     try:
         # get the pets from Airtable
         airtable_pets: List[Dict[str, Any]] = get_airtable_pets()
+        logger.info(f"Got {len(airtable_pets)} pets from Airtable")
+        newdigs_shelterluv_pets: List[Dict[str, Any]] = get_shelterluv_pets(
+            apikey="newdigs_shelterluv_api_key"
+        )
+        logger.info(f"Got {len(newdigs_shelterluv_pets)} pets from New Digs Shelterluv")
+
+        # get the current photos in S3
+        shelterluv_photos: List[str] = get_shelterluv_photos()
 
         # create CSV file of available pets
-        csv_file: str = create_new_digs_csv_file(airtable_pets)
+        csv_file: str = create_new_digs_csv_file(
+            airtable_pets, newdigs_shelterluv_pets, shelterluv_photos
+        )
 
         # upload CSV file to rescuegroups.org
         upload_to_rescue_groups(csv_file)
 
         # get the pets from Shelterluv
         shelterluv_pets: Dict[str, Any] = get_shelterluv_pets()
-
-        # get the current photos in S3
-        shelterluv_photos: List[str] = get_shelterluv_photos()
+        logger.info(f"Got {len(shelterluv_pets)} pets from Shelterluv")
 
         # create CSV of Shelterluv pets
         csv_file_sl: str = create_sl_csv_file(shelterluv_pets, shelterluv_photos)
@@ -139,7 +147,11 @@ def get_airtable_pets() -> Any:
     return pets
 
 
-def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
+def create_new_digs_csv_file(
+    airtable_pets: List[Dict[str, Any]],
+    newdigs_shelterluv_pets: List[Dict[str, Any]],
+    shelterluv_photos: List[str],
+) -> str:
     """Create a CSV file of new digs pets."""
     # pylint: disable=too-many-statements
     filename: str = "newdigs.csv"
@@ -263,6 +275,17 @@ def create_new_digs_csv_file(airtable_pets: List[Dict[str, Any]]) -> str:
 
             writer.writerow(pet_row)
 
+        for pet in newdigs_shelterluv_pets:
+            pet_row, pet_type = parse_sl_pet(pet, shelterluv_photos, new_digs=True)
+            if pet_type == "dog":
+                dog_count += 1
+            elif pet_type == "cat":
+                cat_count += 1
+            else:
+                other_count += 1
+            if pet_row is not None:
+                writer.writerow(pet_row)
+
         if not pets_found:
             # for empty pet list
             logger.info("No adoptable pets found")
@@ -328,8 +351,8 @@ def upload_to_rescue_groups(csv_file: str) -> None:
         logger.warning("Failed to upload to RG")
 
 
-def get_shelterluv_pets() -> List[Dict[str, Any]]:
-    response = secrets_client.get_secret_value(SecretId="shelterluv_api_key")
+def get_shelterluv_pets(apikey="shelterluv_api_key") -> List[Dict[str, Any]]:
+    response = secrets_client.get_secret_value(SecretId=apikey)
     shelterluv_api_key = response["SecretString"]
 
     headers = {"x-api-key": shelterluv_api_key}
@@ -407,150 +430,19 @@ def create_sl_csv_file(pets: List[Dict[str, Any]], shelterluv_photos: List[str])
         writer.writerow(CSV_HEADERS)
 
         # figure out where the columns we have data for reside
-        indexes: Dict[str, int] = {
-            "id": CSV_HEADERS.index("externalID"),
-            "name": CSV_HEADERS.index("name"),
-            "status": CSV_HEADERS.index("status"),
-            "species": CSV_HEADERS.index("type"),
-            "breed": CSV_HEADERS.index("priBreed"),
-            "mix": CSV_HEADERS.index("mix"),
-            "sex": CSV_HEADERS.index("sex"),
-            "ok_dog": CSV_HEADERS.index("okwithdogs"),
-            "ok_cat": CSV_HEADERS.index("okwithcats"),
-            "ok_kid": CSV_HEADERS.index("okwithkids"),
-            "house": CSV_HEADERS.index("housebroken"),
-            "age": CSV_HEADERS.index("age"),
-            "needs": CSV_HEADERS.index("specialNeeds"),
-            "fixed": CSV_HEADERS.index("altered"),
-            "size": CSV_HEADERS.index("size"),
-            "utd": CSV_HEADERS.index("uptodate"),
-            "color": CSV_HEADERS.index("color"),
-            "courtesy": CSV_HEADERS.index("courtesy"),
-            "dsc": CSV_HEADERS.index("dsc"),
-            "found": CSV_HEADERS.index("found"),
-            "photo1": CSV_HEADERS.index("photo1"),
-            "photo2": CSV_HEADERS.index("photo2"),
-            "photo3": CSV_HEADERS.index("photo3"),
-            "photo4": CSV_HEADERS.index("photo4"),
-            "videoUrl": CSV_HEADERS.index("videoUrl"),
-            "housebroken": CSV_HEADERS.index("housebroken"),
-        }
-
         dog_count = 0
         cat_count = 0
         other_count = 0
         for pet in pets:
-            pet_row: List[Optional[str]] = ["" for _ in range(len(CSV_HEADERS))]
-
-            # grab the standard fields
-            pet_row[indexes["id"]] = pet["ID"]
-            pet_row[indexes["name"]] = pet.get("Name", "")
-            pet_row[indexes["status"]] = "Available"
-            pet_row[indexes["sex"]] = pet.get("Sex", "")
-            pet_row[indexes["courtesy"]] = "No"
-            pet_row[indexes["utd"]] = "Yes"
-
-            # deal with fields that are more annoying
-            description: str = pet.get("Description", "")
-            description = description.replace("\r", "&#10;")
-            description = description.replace("\n", "&#10;")
-            pet_row[indexes["dsc"]] = description
-
-            breed = pet.get("Breed", "")
-            if breed is None:
-                breed = ""
-            breeds = breed.split("/")
-            first_breed = breeds[0]
-            pet_row[indexes["breed"]] = sl_breed_to_rg_breed(first_breed)
-            if len(breeds) > 1:
-                pet_row[indexes["mix"]] = "Yes"
-            else:
-                pet_row[indexes["mix"]] = "No"
-
-            species = pet.get("Type")
-            if species == "Dog":
-                color = pet.get("Color", "")
-                color = sl_color_to_rg_color(color, "Dog")
-                pet_row[indexes["color"]] = color
+            pet_row, pet_type = parse_sl_pet(pet, shelterluv_photos)
+            if pet_type == "dog":
                 dog_count += 1
-            elif species == "Cat":
-                color = pet.get("Color", "")
-                color = sl_color_to_rg_color(color, "Cat")
-                pet_row[indexes["color"]] = color
+            elif pet_type == "cat":
                 cat_count += 1
-            elif species == "Pig":
-                pet_row[indexes["breed"]] = "Pig"
-                other_count += 1
-            elif species == "Rabbit, Domestic":
-                species = "Rabbit"
-                other_count += 1
             else:
                 other_count += 1
-
-            pet_row[indexes["species"]] = species
-
-            age_in_months = pet.get("Age")
-            if age_in_months is not None:
-                if age_in_months < 6:
-                    pet_row[indexes["age"]] = "Baby"
-                elif age_in_months < 18:
-                    pet_row[indexes["age"]] = "Young"
-                elif age_in_months < 84:
-                    pet_row[indexes["age"]] = "Adult"
-                else:
-                    pet_row[indexes["age"]] = "Senior"
-
-            size = pet.get("Size")
-            if size is not None:
-                if "small" in size.lower():
-                    pet_row[indexes["size"]] = "Small"
-                elif "medium" in size.lower():
-                    pet_row[indexes["size"]] = "Medium"
-                elif "large" in size.lower():
-                    if "x" in size.lower():
-                        pet_row[indexes["size"]] = "X-Large"
-                    else:
-                        pet_row[indexes["size"]] = "Large"
-
-            if pet.get("Altered") == "Yes":
-                pet_row[indexes["fixed"]] = "Yes"
-
-            photos = pet.get("Photos", [])
-            photos = deal_with_sl_photos(photos, shelterluv_photos)
-            if len(photos) > 0:
-                pet_row[indexes["photo1"]] = photos[0]
-            if len(photos) > 1:
-                pet_row[indexes["photo2"]] = photos[1]
-            if len(photos) > 2:
-                pet_row[indexes["photo3"]] = photos[2]
-            if len(photos) > 3:
-                pet_row[indexes["photo4"]] = photos[3]
-
-            videos = pet.get("Videos", [])
-
-            if len(videos) > 0:
-                video = videos[0]
-                pet_row[indexes["videoUrl"]] = video.get("YoutubeUrl", "")
-
-            attributes = pet.get("Attributes", [])
-            attributes = [attribute.get("Internal-ID") for attribute in attributes]
-
-            if "14835" in attributes or "14839" in attributes:
-                pet_row[indexes["housebroken"]] = "Yes"
-
-            if "14842" in attributes:
-                pet_row[indexes["ok_dog"]] = "Yes"
-
-            if "14841" in attributes:
-                pet_row[indexes["ok_cat"]] = "Yes"
-
-            if "14840" in attributes:
-                pet_row[indexes["ok_kid"]] = "Yes"
-
-            if "260578" in attributes or "260579" in attributes:
-                pet_row[indexes["needs"]] = "Yes"
-
-            writer.writerow(pet_row)
+            if pet_row is not None:
+                writer.writerow(pet_row)
 
         logger.info(
             "Found %d dogs, %d cats, %d other adoptable",
@@ -560,6 +452,156 @@ def create_sl_csv_file(pets: List[Dict[str, Any]], shelterluv_photos: List[str])
         )
 
         return filename
+
+
+def parse_sl_pet(
+    pet: Dict[str, Any], shelterluv_photos: List[str], new_digs: bool = False
+) -> List[Optional[str]]:
+    """Parse a shelterluv pet into a CSV row."""
+    indexes: Dict[str, int] = {
+        "id": CSV_HEADERS.index("externalID"),
+        "name": CSV_HEADERS.index("name"),
+        "status": CSV_HEADERS.index("status"),
+        "species": CSV_HEADERS.index("type"),
+        "breed": CSV_HEADERS.index("priBreed"),
+        "mix": CSV_HEADERS.index("mix"),
+        "sex": CSV_HEADERS.index("sex"),
+        "ok_dog": CSV_HEADERS.index("okwithdogs"),
+        "ok_cat": CSV_HEADERS.index("okwithcats"),
+        "ok_kid": CSV_HEADERS.index("okwithkids"),
+        "house": CSV_HEADERS.index("housebroken"),
+        "age": CSV_HEADERS.index("age"),
+        "needs": CSV_HEADERS.index("specialNeeds"),
+        "fixed": CSV_HEADERS.index("altered"),
+        "size": CSV_HEADERS.index("size"),
+        "utd": CSV_HEADERS.index("uptodate"),
+        "color": CSV_HEADERS.index("color"),
+        "courtesy": CSV_HEADERS.index("courtesy"),
+        "dsc": CSV_HEADERS.index("dsc"),
+        "found": CSV_HEADERS.index("found"),
+        "photo1": CSV_HEADERS.index("photo1"),
+        "photo2": CSV_HEADERS.index("photo2"),
+        "photo3": CSV_HEADERS.index("photo3"),
+        "photo4": CSV_HEADERS.index("photo4"),
+        "videoUrl": CSV_HEADERS.index("videoUrl"),
+        "housebroken": CSV_HEADERS.index("housebroken"),
+    }
+
+    pet_row: List[Optional[str]] = ["" for _ in range(len(CSV_HEADERS))]
+    pet_type: str = ""
+
+    # grab the standard fields
+    if new_digs:
+        pet_row[indexes["id"]] = "ND" + pet["ID"]
+    else:
+        pet_row[indexes["id"]] = pet["ID"]
+    pet_row[indexes["name"]] = pet.get("Name", "")
+    pet_row[indexes["status"]] = "Available"
+    pet_row[indexes["sex"]] = pet.get("Sex", "")
+    pet_row[indexes["courtesy"]] = "No"
+    pet_row[indexes["utd"]] = "Yes"
+
+    # deal with fields that are more annoying
+    description: str = pet.get("Description", "")
+    description = description.replace("\r", "&#10;")
+    description = description.replace("\n", "&#10;")
+    pet_row[indexes["dsc"]] = description
+
+    breed = pet.get("Breed", "")
+    if breed is None:
+        breed = ""
+    breeds = breed.split("/")
+    first_breed = breeds[0]
+    pet_row[indexes["breed"]] = sl_breed_to_rg_breed(first_breed)
+    if len(breeds) > 1:
+        pet_row[indexes["mix"]] = "Yes"
+    else:
+        pet_row[indexes["mix"]] = "No"
+
+    species = pet.get("Type")
+    if species == "Dog":
+        color = pet.get("Color", "")
+        color = sl_color_to_rg_color(color, "Dog")
+        pet_row[indexes["color"]] = color
+        pet_type = "dog"
+    elif species == "Cat":
+        color = pet.get("Color", "")
+        color = sl_color_to_rg_color(color, "Cat")
+        pet_row[indexes["color"]] = color
+        pet_type = "cat"
+    elif species == "Pig":
+        pet_row[indexes["breed"]] = "Pig"
+        pet_type = "other"
+    elif species == "Rabbit, Domestic":
+        species = "Rabbit"
+        pet_type = "other"
+    else:
+        pet_type = "other"
+
+    pet_row[indexes["species"]] = species
+
+    age_in_months = pet.get("Age")
+    if age_in_months is not None:
+        if age_in_months < 6:
+            pet_row[indexes["age"]] = "Baby"
+        elif age_in_months < 18:
+            pet_row[indexes["age"]] = "Young"
+        elif age_in_months < 84:
+            pet_row[indexes["age"]] = "Adult"
+        else:
+            pet_row[indexes["age"]] = "Senior"
+
+    size = pet.get("Size")
+    if size is not None:
+        if "small" in size.lower():
+            pet_row[indexes["size"]] = "Small"
+        elif "medium" in size.lower():
+            pet_row[indexes["size"]] = "Medium"
+        elif "large" in size.lower():
+            if "x" in size.lower():
+                pet_row[indexes["size"]] = "X-Large"
+            else:
+                pet_row[indexes["size"]] = "Large"
+
+    if pet.get("Altered") == "Yes":
+        pet_row[indexes["fixed"]] = "Yes"
+
+    photos = pet.get("Photos", [])
+    photos = deal_with_sl_photos(photos, shelterluv_photos)
+    if len(photos) > 0:
+        pet_row[indexes["photo1"]] = photos[0]
+    if len(photos) > 1:
+        pet_row[indexes["photo2"]] = photos[1]
+    if len(photos) > 2:
+        pet_row[indexes["photo3"]] = photos[2]
+    if len(photos) > 3:
+        pet_row[indexes["photo4"]] = photos[3]
+
+    videos = pet.get("Videos", [])
+
+    if len(videos) > 0:
+        video = videos[0]
+        pet_row[indexes["videoUrl"]] = video.get("YoutubeUrl", "")
+
+    attributes = pet.get("Attributes", [])
+    attributes = [attribute.get("Internal-ID") for attribute in attributes]
+
+    if "14835" in attributes or "14839" in attributes:
+        pet_row[indexes["housebroken"]] = "Yes"
+
+    if "14842" in attributes:
+        pet_row[indexes["ok_dog"]] = "Yes"
+
+    if "14841" in attributes:
+        pet_row[indexes["ok_cat"]] = "Yes"
+
+    if "14840" in attributes:
+        pet_row[indexes["ok_kid"]] = "Yes"
+
+    if "260578" in attributes or "260579" in attributes:
+        pet_row[indexes["needs"]] = "Yes"
+
+    return pet_row, pet_type
 
 
 def deal_with_sl_photos(

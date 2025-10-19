@@ -145,6 +145,10 @@ data "aws_secretsmanager_secret" "shelterluv_api_key" {
   name = "shelterluv_api_key"
 }
 
+data "aws_secretsmanager_secret" "newdigs_shelterluv_api_key" {
+  name = "newdigs_shelterluv_api_key"
+}
+
 resource "aws_s3_bucket" "shelterluv_photos_bucket" {
   bucket = "dpa-shelterluv-photos"
 }
@@ -190,6 +194,7 @@ resource "aws_iam_policy" "rg_sync_policy" {
         Effect    = "Allow"
         Resource  = [
           data.aws_secretsmanager_secret.shelterluv_api_key.arn,
+          data.aws_secretsmanager_secret.newdigs_shelterluv_api_key.arn
         ]
       }, {
         Action    = [
