@@ -93,6 +93,8 @@ resource "aws_cloudwatch_event_rule" "petfinder_sync_event_rule" {
   name = "petfinder_sync_event_rule"
   description = "invoke petfinder sync once an hour"
   schedule_expression = "rate(1 hour)"
+
+  is_enabled = false
 }
 
 resource "aws_cloudwatch_event_target" "petfinder_sync_event_target" {
