@@ -51,12 +51,19 @@ def test_current_attribute_names():
 def test_current_attribute_ids():
     """Current Shelterluv IDs match even if the attribute gets renamed."""
     row, _ = parse_sl_pet(
-        make_pet([attribute("448580", "Pup pal"), attribute("122172", "Potty pro")]),
+        make_pet(
+            [
+                attribute("448580", "Pup pal"),
+                attribute("122172", "Potty pro"),
+                attribute("8642130", "Extra care"),
+            ]
+        ),
         [],
     )
 
     assert column(row, "okwithdogs") == "Yes"
     assert column(row, "housebroken") == "Yes"
+    assert column(row, "specialNeeds") == "Yes"
 
 
 def test_unpublished_attribute_ids_ignored():

@@ -621,7 +621,7 @@ SL_ATTRIBUTES = {
     "ok_cat": ({"122097", "122105", "448579"}, {"good with cats"}),
     "ok_kid": ({"122095", "122103", "448578"}, {"good with kids"}),
     "housebroken": ({"122172", "448577"}, {"housebroken", "housetrained"}),
-    "needs": (set(), {"special needs"}),
+    "needs": ({"122100", "8642130"}, {"special needs"}),
 }
 
 
