@@ -705,13 +705,14 @@ def clean_text(text: Optional[str]) -> str:
 
 def sl_cat_breed_to_coat_length(breed: str) -> str:
     """Shelterluv has no coat length field, so read it from cat breeds like "Domestic Shorthair"."""
-    breed = breed.lower().replace(" ", "")
-    if "shorthair" in breed:
-        return "Short"
-    if "mediumhair" in breed:
-        return "Medium"
-    if "longhair" in breed:
-        return "Long"
+    for part in breed.split("/"):
+        part = part.lower().replace(" ", "")
+        if "shorthair" in part:
+            return "Short"
+        if "mediumhair" in part:
+            return "Medium"
+        if "longhair" in part:
+            return "Long"
     return ""
 
 

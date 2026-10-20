@@ -131,6 +131,11 @@ def test_cat_coat_length_from_breed():
     assert coat_for("Cat", "Siamese") == ""
 
 
+def test_cat_coat_length_uses_first_breed_listed():
+    assert coat_for("Cat", "Domestic Longhair/Domestic Shorthair") == "Long"
+    assert coat_for("Cat", "Siamese/Domestic Medium Hair") == "Medium"
+
+
 def test_no_coat_length_for_dogs():
     assert coat_for("Dog", "Retriever, Labrador") == ""
 
