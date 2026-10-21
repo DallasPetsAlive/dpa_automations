@@ -8,6 +8,8 @@ import configparser
 import csv
 import ftplib
 import logging
+import re
+import unicodedata
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlparse
 
@@ -322,6 +324,8 @@ def parse_sl_pet(
         "status": CSV_HEADERS.index("status"),
         "species": CSV_HEADERS.index("type"),
         "breed": CSV_HEADERS.index("priBreed"),
+        "sec_breed": CSV_HEADERS.index("secBreed"),
+        "length": CSV_HEADERS.index("coatLength"),
         "mix": CSV_HEADERS.index("mix"),
         "sex": CSV_HEADERS.index("sex"),
         "ok_dog": CSV_HEADERS.index("okwithdogs"),
@@ -353,14 +357,14 @@ def parse_sl_pet(
         pet_row[indexes["id"]] = "ND" + pet["ID"]
     else:
         pet_row[indexes["id"]] = pet["ID"]
-    pet_row[indexes["name"]] = pet.get("Name", "")
+    pet_row[indexes["name"]] = clean_text(pet.get("Name", ""))
     pet_row[indexes["status"]] = "Available"
     pet_row[indexes["sex"]] = pet.get("Sex", "")
     pet_row[indexes["courtesy"]] = "No"
     pet_row[indexes["utd"]] = "Yes"
 
     # deal with fields that are more annoying
-    description: str = pet.get("Description", "")
+    description: str = clean_text(pet.get("Description", ""))
     description = description.replace("\r", "&#10;")
     description = description.replace("\n", "&#10;")
     pet_row[indexes["dsc"]] = description
@@ -369,8 +373,15 @@ def parse_sl_pet(
     if breed is None:
         breed = ""
     breeds = breed.split("/")
-    first_breed = breeds[0]
-    pet_row[indexes["breed"]] = sl_breed_to_rg_breed(first_breed)
+    rg_breeds = [sl_breed_to_rg_breed(b.strip()) for b in breeds]
+    # prefer real breeds over "Mixed Breed", e.g. "Mixed Breed (Large)/Mastiff"
+    specific_breeds = [b for b in rg_breeds if b and not is_generic_mix(b)]
+    if specific_breeds:
+        pet_row[indexes["breed"]] = specific_breeds[0]
+    else:
+        pet_row[indexes["breed"]] = rg_breeds[0]
+    if len(specific_breeds) > 1:
+        pet_row[indexes["sec_breed"]] = specific_breeds[1]
     if len(breeds) > 1:
         pet_row[indexes["mix"]] = "Yes"
     else:
@@ -386,6 +397,7 @@ def parse_sl_pet(
         color = pet.get("Color", "")
         color = sl_color_to_rg_color(color, "Cat")
         pet_row[indexes["color"]] = color
+        pet_row[indexes["length"]] = sl_cat_breed_to_coat_length(breed)
         pet_type = "cat"
     elif species == "Pig":
         pet_row[indexes["breed"]] = "Pig"
@@ -441,25 +453,141 @@ def parse_sl_pet(
         video = videos[0]
         pet_row[indexes["videoUrl"]] = video.get("YoutubeUrl", "")
 
-    attributes = pet.get("Attributes", [])
-    attributes = [attribute.get("Internal-ID") for attribute in attributes]
+    # match published attributes by Shelterluv ID or by name, since IDs change
+    # when attributes are recreated (e.g. "Good with Dogs" and "Dog: Good with Dogs")
+    published = [
+        attribute
+        for attribute in pet.get("Attributes") or []
+        if attribute.get("Publish") != "No"
+    ]
+    attribute_ids = {attribute.get("Internal-ID") for attribute in published}
+    attribute_names = {
+        normalize_attribute_name(attribute.get("AttributeName"))
+        for attribute in published
+    }
 
-    if "14835" in attributes or "14839" in attributes:
-        pet_row[indexes["housebroken"]] = "Yes"
-
-    if "14842" in attributes:
-        pet_row[indexes["ok_dog"]] = "Yes"
-
-    if "14841" in attributes:
-        pet_row[indexes["ok_cat"]] = "Yes"
-
-    if "14840" in attributes:
-        pet_row[indexes["ok_kid"]] = "Yes"
-
-    if "260578" in attributes or "260579" in attributes:
-        pet_row[indexes["needs"]] = "Yes"
+    for column, (ids, names) in SL_ATTRIBUTES.items():
+        if attribute_ids & ids or attribute_names & names:
+            pet_row[indexes[column]] = "Yes"
 
     return pet_row, pet_type
+
+
+# Shelterluv attribute IDs (as of Oct 2026) and normalized names for each CSV column
+SL_ATTRIBUTES = {
+    "ok_dog": ({"122096", "122104", "448580"}, {"good with dogs"}),
+    "ok_cat": ({"122097", "122105", "448579"}, {"good with cats"}),
+    "ok_kid": ({"122095", "122103", "448578"}, {"good with kids"}),
+    "housebroken": ({"122172", "448577"}, {"housebroken", "housetrained"}),
+    "needs": ({"122100", "8642130"}, {"special needs"}),
+}
+
+
+SMART_PUNCTUATION = {
+    "‘": "'",
+    "’": "'",
+    "“": '"',
+    "”": '"',
+    "–": "-",
+    "—": " - ",
+    "…": "...",
+    " ": " ",
+}
+
+# zero-width joiner, variation selectors and keycap marks that glue emojis together
+EMOJI_JOINERS = {"‍", "︎", "️", "⃣"}
+
+
+def is_emoji(char: str) -> bool:
+    """True for emojis, pictographs and the invisible characters that join them."""
+    return char in EMOJI_JOINERS or (
+        ord(char) >= 0x2190 and unicodedata.category(char) in ("So", "Sk")
+    )
+
+
+def clean_text(text: Optional[str]) -> str:
+    """Make text plain ASCII, since Petfinder garbles anything else (e.g. "â€™").
+
+    Emojis are removed, curly punctuation becomes plain, and accents are
+    dropped ("Brûlée" -> "Brulee").
+    """
+    if not text:
+        return ""
+
+    # emojis used as list bullets ("✅ Super chill") become "- Super chill";
+    # a line counts as a list item when a neighboring line also starts with an
+    # emoji or it follows a heading like "✨ The Highlights:"
+    lines = text.split("\n")
+    starts_with_emoji = [
+        bool(line.strip()) and is_emoji(line.strip()[0]) for line in lines
+    ]
+    bulleted_lines: List[str] = []
+    for i, line in enumerate(lines):
+        if starts_with_emoji[i]:
+            rest = line.strip()
+            while rest and (is_emoji(rest[0]) or rest[0].isspace()):
+                rest = rest[1:]
+            previous = lines[i - 1].strip() if i > 0 else ""
+            in_list = (
+                (i > 0 and starts_with_emoji[i - 1])
+                or (i + 1 < len(lines) and starts_with_emoji[i + 1])
+                or previous.endswith(":")
+            )
+            if rest and in_list and not rest.endswith(":"):
+                line = "- " + rest + ("\r" if line.endswith("\r") else "")
+        bulleted_lines.append(line)
+
+    cleaned: List[str] = []
+    for char in "\n".join(bulleted_lines):
+        if char in SMART_PUNCTUATION:
+            cleaned.append(SMART_PUNCTUATION[char])
+        elif is_emoji(char):
+            continue
+        else:
+            cleaned.append(char)
+
+    # drop accents, then anything else that isn't plain ASCII
+    ascii_text = (
+        unicodedata.normalize("NFKD", "".join(cleaned))
+        .encode("ascii", "ignore")
+        .decode("ascii")
+    )
+
+    # tidy the gaps left behind by removed emojis, without touching line breaks
+    tidy_lines = [
+        re.sub(r"^[ \t]+|[ \t]+(?=\r?$)", "", re.sub(r"[ \t]{2,}", " ", line))
+        for line in ascii_text.split("\n")
+    ]
+    return "\n".join(tidy_lines).strip()
+
+
+def sl_cat_breed_to_coat_length(breed: str) -> str:
+    """Shelterluv has no coat length field, so read it from cat breeds like "Domestic Shorthair"."""
+    for part in breed.split("/"):
+        part = part.lower().replace(" ", "")
+        if "shorthair" in part:
+            return "Short"
+        if "mediumhair" in part:
+            return "Medium"
+        if "longhair" in part:
+            return "Long"
+    return ""
+
+
+def is_generic_mix(breed: str) -> bool:
+    """True for placeholder breeds like "Mixed Breed" or "Mix"."""
+    return breed.strip().lower() in ("mixed breed", "mix", "mixed")
+
+
+def normalize_attribute_name(name: Optional[str]) -> str:
+    """Normalize a Shelterluv attribute name, e.g. "Dog: House-Trained" -> "housetrained"."""
+    name = (name or "").strip().lower()
+    for prefix in ("dog:", "cat:"):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+    name = name.replace("house-trained", "housetrained")
+    name = name.replace("house trained", "housetrained")
+    return " ".join(name.split())
 
 
 def deal_with_sl_photos(
